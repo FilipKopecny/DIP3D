@@ -1,0 +1,53 @@
+Overbryce Animator 2.0
+======================
+
+A key-frame 3D animation editor: a port of Overbryce Animator 1.0 (1998) to .NET 10 and OpenGL 3.3.
+This build is self-contained: no .NET installation is needed.
+
+Requirements: Windows 10 or 11 (x64) and a graphics card with OpenGL 3.3.
+
+
+Start
+-----
+
+Overbryce.exe      the editor (File > Open starts in the Scenes folder)
+Lumina.cmd         opens the Lumina animation; press F5 to play it
+
+Scenes\            the seven 1998 sample animations with their textures
+Scenes\Lumina\     Lumina, an animation made for the port, and its textures: 64 seconds in all,
+                   a 16-second approach through space, then 48 seconds on the moon
+
+
+Controls
+--------
+
+Click an object in the 3D view      select it (Alt+click: the enclosing group)
+Ctrl+1 .. Ctrl+4                    camera, front, side or top view
+Left-drag / mouse wheel             orbit / zoom the front, side and top views
+F5                                  play or stop
+Drag the timeline                   preview any moment of the animation
+PgUp / PgDn                         previous / next key state (PgDn on the last one adds a new state)
+Ctrl+E                              export frames (File > Rendering settings: size, format)
+F1                                  all controls
+
+
+Rendering from the command line
+-------------------------------
+
+One picture:
+
+  Overbryce.exe Scenes\Lumina\Lumina.ani --snapshot lumina.png --time 54 --size 1280x720
+
+Every frame of the animation, as PNG files:
+
+  Overbryce.exe Scenes\Lumina\Lumina.ani --frames frames --size 1280x720
+
+Other options: --from and --to (seconds), --view camera|front|side|top, --wire.
+
+
+Graphics card
+-------------
+
+On laptops with two graphics cards Windows may run Overbryce on the integrated one. To use the
+faster card, add Overbryce.exe in Settings > System > Display > Graphics and choose
+"High performance".

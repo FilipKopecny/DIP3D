@@ -1,0 +1,24 @@
+# Thesis text (anim.doc) and the figures it links (TEXT/Images): not published
+TEXT/
+
+# Original design documents and the year project (DIP/DOCS): not published
+DIP/DOCS/
+
+# .NET build output
+[Bb]in/
+[Oo]bj/
+TestResults/
+*.binlog
+
+# IDE and user files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.rsuser
+
+# Frames and snapshots rendered while trying the app
+Port/out/
+Port/*.png
+Port/*.bmp
