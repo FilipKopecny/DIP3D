@@ -21,10 +21,16 @@ internal sealed class RenderOptions
 
     /// <summary>Maps a texture name from the model to a file path (or null when not found).</summary>
     public Func<string, string?> ResolveTexture { get; init; } = _ => null;
+
+    /// <summary>The modern renderer's settings, or null for the classic (1998) look.</summary>
+    public ModernSettings? Modern { get; init; }
+
+    /// <summary>Multisampling of the modern renderer's frame (the classic one uses the target's own).</summary>
+    public int Samples { get; init; } = 4;
 }
 
 /// <summary>Draws a <see cref="Scene"/> with OpenGL 3.3 core and finds the element under the mouse.</summary>
-internal sealed class SceneRenderer : IDisposable
+internal sealed partial class SceneRenderer : IDisposable
 {
     private static readonly Vector4 White = new(1, 1, 1, 1);
     private static readonly Vector4 LightIconColor = new(1, 1, 0, 1);
@@ -57,6 +63,16 @@ internal sealed class SceneRenderer : IDisposable
 
         /// <summary>The scene element this geometry belongs to (for picking).</summary>
         public Element? Owner;
+
+        /// <summary>Filled (not wire-frame) geometry.</summary>
+        public bool Filled;
+
+        /// <summary>Bounding sphere in world space.</summary>
+        public Vector3 Center;
+        public float Radius;
+
+        /// <summary>Modern rendering: the reflection probe this element uses (-1 none).</summary>
+        public int Probe = -1;
     }
 
     public SceneRenderer()
@@ -78,6 +94,12 @@ internal sealed class SceneRenderer : IDisposable
 
     public void Render(Scene? scene, RenderOptions options, int width, int height)
     {
+        if (scene != null && options.Modern != null && !options.Wireframe)
+        {
+            RenderModern(scene, options, options.Modern, Math.Max(1, width), Math.Max(1, height));
+            return;
+        }
+
         GL.Viewport(0, 0, Math.Max(1, width), Math.Max(1, height));
         GL.ClearColor(0, 0, 0, 1);
         GL.ClearDepth(1);
@@ -85,19 +107,14 @@ internal sealed class SceneRenderer : IDisposable
         if (scene == null) return;
 
         Prepare(scene, options);
+        SetBlend(options);
 
-        if (options.AlphaBlend)
-        {
-            GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-        }
-        else
-        {
-            GL.Disable(EnableCap.Blend);
-        }
-
-        _shader.Set("uPick", false);
+        _shader.Set("uPass", 0);
+        _shader.Set("uModern", false);
+        _shader.Set("uEnvOn", false);
+        _shader.Set("uUseAo", false);
         _shader.Set("uGlobalAmbient", new Vector4(0.2f, 0.2f, 0.2f, 1f)); // GL_LIGHT_MODEL_AMBIENT default
+        _shader.Set("uCameraPos", CameraPosition(options.View));
         SetupLights(scene, options);
         SetupFog(scene, options);
 
@@ -136,7 +153,7 @@ internal sealed class SceneRenderer : IDisposable
 
             Prepare(scene, options);
             GL.Disable(EnableCap.Blend);
-            _shader.Set("uPick", true);
+            _shader.Set("uPass", 1);
             _shader.Set("uFogMode", 0);
             _shader.Set("uLightCount", 0);
 
@@ -151,7 +168,7 @@ internal sealed class SceneRenderer : IDisposable
             }
             GL.Disable(EnableCap.PolygonOffsetFill);
             GL.BindVertexArray(0);
-            _shader.Set("uPick", false);
+            _shader.Set("uPass", 0);
 
             // read a small window around the cursor (GL rows start at the bottom)
             int cx = x, cy = height - 1 - y;
@@ -210,7 +227,61 @@ internal sealed class SceneRenderer : IDisposable
         _shader.Set("uView", options.View);
         _shader.Set("uProj", options.Projection);
         _shader.Set("uAlphaTest", options.AlphaBlend);
-        _shader.Set("uTexture", 0);
+        _shaderAlphaTest = options.AlphaBlend;
+        AssignSamplerUnits(_shader);
+    }
+
+    /// <summary>Every sampler on its own unit: samplers of different types sharing one make draws fail.</summary>
+    private static void AssignSamplerUnits(ShaderProgram program)
+    {
+        program.Set("uTexture", 0);
+        program.Set("uAoTex", AoUnit);
+        program.Set("uEnvMap", EnvUnit);
+        for (int i = 0; i < ShaderProgram.MaxShadowLights; i++) program.Set($"uShadow{i}", ShadowUnit + i);
+    }
+
+    private static void SetBlend(RenderOptions options)
+    {
+        if (options.AlphaBlend)
+        {
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        }
+        else
+        {
+            GL.Disable(EnableCap.Blend);
+        }
+    }
+
+    /// <summary>World position of the eye of a view matrix.</summary>
+    private static Vector3 CameraPosition(Matrix4x4 view) =>
+        Matrix4x4.Invert(view, out var inv) ? new Vector3(inv.M41, inv.M42, inv.M43) : Vector3.Zero;
+
+    /// <summary>Bounding sphere of a command's vertices in world space.</summary>
+    private void ComputeBounds(DrawCommand cmd)
+    {
+        var data = _geometry.Data;
+        const int F = GeometryBuilder.FloatsPerVertex;
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var r in cmd.Ranges)
+            for (int v = r.First; v < r.First + r.Count; v++)
+            {
+                var p = new Vector3(data[v * F], data[v * F + 1], data[v * F + 2]);
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+            }
+        if (min.X > max.X) return;
+        var c = (min + max) / 2;
+        float r2 = 0;
+        foreach (var r in cmd.Ranges)
+            for (int v = r.First; v < r.First + r.Count; v++)
+                r2 = MathF.Max(r2, Vector3.DistanceSquared(c, new Vector3(data[v * F], data[v * F + 1], data[v * F + 2])));
+        var m = cmd.Model;
+        float scale = MathF.Sqrt(MathF.Max(new Vector3(m.M11, m.M12, m.M13).LengthSquared(),
+            MathF.Max(new Vector3(m.M21, m.M22, m.M23).LengthSquared(), new Vector3(m.M31, m.M32, m.M33).LengthSquared())));
+        cmd.Center = Vector3.Transform(c, m);
+        cmd.Radius = MathF.Sqrt(r2) * scale;
     }
 
     private void Draw(DrawCommand cmd, Vector4 color)
@@ -241,9 +312,15 @@ internal sealed class SceneRenderer : IDisposable
 
     // ---------------------------------------------------------------------------- lights & fog
 
+    /// <summary>A light as uploaded to the shader (world space), for the modern passes.</summary>
+    private readonly record struct ActiveLight(LightElement Light, Vector3 Position, Vector3 Direction);
+
+    private readonly List<ActiveLight> _lights = new();
+
     private void SetupLights(Scene scene, RenderOptions options)
     {
         int count = 0;
+        _lights.Clear();
         if (!options.Wireframe)
         {
             int slot = 0;
@@ -253,9 +330,10 @@ internal sealed class SceneRenderer : IDisposable
                 if (!light.Enabled) continue;
 
                 // position/direction are given in the frame of the light's parent (scene/group chain)
-                var toEye = Transforms.ParentChain(light) * options.View;
-                var pos = Vector4.Transform(new Vector4(light.X, light.Y, light.Z, 1), toEye);
-                var dir = Vector3.TransformNormal(new Vector3(light.Alpha, light.Beta, light.Gamma), toEye);
+                var toWorld = Transforms.ParentChain(light);
+                var pos = Vector3.Transform(new Vector3(light.X, light.Y, light.Z), toWorld);
+                var dir = Vector3.TransformNormal(new Vector3(light.Alpha, light.Beta, light.Gamma), toWorld);
+                _lights.Add(new ActiveLight(light, pos, dir));
                 string i = $"[{count}]";
                 _shader.Set("uLightPos" + i, pos);
                 _shader.Set("uLightSpotDir" + i, dir);
@@ -346,6 +424,7 @@ internal sealed class SceneRenderer : IDisposable
             Material = e,
             SphereMap = e is TorusElement,
             Owner = e,
+            Filled = !lines,
         };
         if (e.HasTexture && options.ResolveTexture(e.Texture!) is { } path)
             cmd.Texture = Textures.Get(path);
@@ -409,8 +488,12 @@ internal sealed class SceneRenderer : IDisposable
         }
     }
 
+    private bool _shaderAlphaTest;
+
     public void Dispose()
     {
+        _modern?.Dispose();
+        _shadowShader?.Dispose();
         Textures.Dispose();
         _pickBuffer?.Dispose();
         GL.DeleteBuffer(_vbo);

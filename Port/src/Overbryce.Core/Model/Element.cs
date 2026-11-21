@@ -89,6 +89,26 @@ public abstract class Element
     [Category("4 Material"), Description("0..1, multiplied by 128 to get the OpenGL specular exponent.")]
     public float Shininess { get; set; } = 0.8f;
 
+    // ------------------------------------------------------------------ modern rendering (2.1)
+    // Stored in the extension block after the original format (see AniExtensions); the classic
+    // renderer ignores them.
+
+    [Category("9 Modern rendering"), DisplayName("Reflectivity"), Description("0..1: how much the surface mirrors its surroundings, more at grazing angles (modern rendering only).")]
+    public float Reflectivity { get; set; }
+
+    [Category("9 Modern rendering"), DisplayName("Refractive index"), Description("1 = off. Above 1 the see-through part of a translucent element (diffuse alpha below 1) bends the light like glass: 1.33 water, 1.5 glass (modern rendering only).")]
+    public float RefractiveIndex { get; set; } = 1f;
+
+    [Category("9 Modern rendering"), DisplayName("Glow"), Description("Multiplies the emission colour: above 1 the element shines brighter than white and glows (modern rendering only).")]
+    public float Glow { get; set; } = 1f;
+
+    [Category("9 Modern rendering"), DisplayName("Casts shadows"), Description("The element casts shadows (modern rendering only). An element that encloses a light never shadows that light.")]
+    public bool CastsShadows { get; set; } = true;
+
+    /// <summary>Extension values this version does not know (from a newer version); kept and written back unchanged.</summary>
+    [Browsable(false)]
+    public Dictionary<string, string>? ExtensionData { get; set; }
+
     // ------------------------------------------------------------------ animation
 
     /// <summary>
@@ -155,6 +175,7 @@ public abstract class Element
     {
         var copy = (Element)MemberwiseClone();
         copy.Parent = null;
+        if (ExtensionData != null) copy.ExtensionData = new Dictionary<string, string>(ExtensionData, StringComparer.Ordinal);
         copy.CloneDeepParts();
         return copy;
     }
@@ -195,6 +216,9 @@ public abstract class Element
         Specular = Rgba.Interpolate(w, prev.Specular, Specular, next.Specular, nn.Specular);
         Emission = Rgba.Interpolate(w, prev.Emission, Emission, next.Emission, nn.Emission);
         Shininess = Math.Clamp(w.Interpolate(prev.Shininess, Shininess, next.Shininess, nn.Shininess), 0f, 1f);
+        Reflectivity = Math.Clamp(w.Interpolate(prev.Reflectivity, Reflectivity, next.Reflectivity, nn.Reflectivity), 0f, 1f);
+        RefractiveIndex = Math.Max(1f, w.Interpolate(prev.RefractiveIndex, RefractiveIndex, next.RefractiveIndex, nn.RefractiveIndex));
+        Glow = Math.Max(0f, w.Interpolate(prev.Glow, Glow, next.Glow, nn.Glow));
 
         ApplyPermanentMotion(time);
     }

@@ -28,6 +28,14 @@ public sealed class Animation
     [Browsable(false)]
     public List<Scene> Scenes { get; } = [];
 
+    /// <summary>Settings of the modern renderer (new in 2.1; stored after the original format).</summary>
+    [Browsable(false)]
+    public ModernSettings Modern { get; } = new();
+
+    /// <summary>Extension records this version does not know (from a newer version); written back unchanged.</summary>
+    [Browsable(false)]
+    public List<string> UnknownExtensions { get; } = [];
+
     [Category("Animation"), DisplayName("Start time [s]")]
     public float StartTime => Scenes.Count > 0 ? Scenes[0].AniTime : 0;
 

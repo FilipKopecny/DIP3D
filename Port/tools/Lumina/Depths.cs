@@ -477,8 +477,8 @@ internal sealed class Depths
             if (age < 0 || age > 3.2f) continue;
             var from = HeroAt(born) + new Vector3(0, 0.25f, 0);
             var p = from + new Vector3(0.12f * MathF.Sin(age * 5 + k), 1.1f * age, 0.12f * MathF.Cos(age * 4 + k));
-            var bubble = Mat(new SphereElement($"Bublina{k}") { Radius = 0.04f + 0.03f * Rnd(k, 661) + 0.01f * age, QualityX = 8, QualityY = 6 },
-                C(0.85f, 0.97f, 1f, 0.45f), ambient: 0.8f, emission: C(0.25f, 0.35f, 0.4f), spec: 1f, shine: 0.9f);
+            var bubble = Glass(Mat(new SphereElement($"Bublina{k}") { Radius = 0.04f + 0.03f * Rnd(k, 661) + 0.01f * age, QualityX = 8, QualityY = 6 },
+                C(0.85f, 0.97f, 1f, 0.45f), ambient: 0.8f, emission: C(0.25f, 0.35f, 0.4f), spec: 1f, shine: 0.9f), 1.33f);
             Place(bubble, p);
             scene.Add(bubble);
         }
@@ -497,7 +497,7 @@ internal sealed class Depths
         {
             float a = k * 40 * Deg;
             var rune = Glow(new SphereElement($"PortalRuna{k}") { Radius = 0.09f, QualityX = 8, QualityY = 6 },
-                Mul(k % 2 == 0 ? C(0.4f, 0.95f, 1f) : C(0.85f, 0.5f, 1f), (0.2f + 0.8f * wake) * (0.7f + 0.3f * Wave(t, 1.5f, k / 9f))));
+                Mul(k % 2 == 0 ? C(0.4f, 0.95f, 1f) : C(0.85f, 0.5f, 1f), (0.2f + 0.8f * wake) * (0.7f + 0.3f * Wave(t, 1.5f, k / 9f))), glow: 2.5f);
             Place(rune, new Vector3(-0.32f, 1.75f * MathF.Sin(a), 1.75f * MathF.Cos(a)));
             group.Add(rune);
         }

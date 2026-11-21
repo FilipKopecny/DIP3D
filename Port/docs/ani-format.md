@@ -110,10 +110,64 @@ KoniecAnimacie
 
 ## How the port reads and writes the format
 
-- **Reading** is tolerant in the same way as `ifstream >>`. Anything after `KoniecAnimacie` is ignored, and `inf` / `nan` are accepted.
+- **Reading** is tolerant in the same way as `ifstream >>`. Anything after `KoniecAnimacie` is ignored, except the extension block below, and `inf` / `nan` are accepted.
 - **Writing** uses the same token order, so the original program can read the files. The port writes:
   - numbers in `%g` format (6 significant digits)
   - textures as `128 128 <file name>`; spaces in a file name become `_`
   - draw style `100012` or `100011`
 - **Saving** copies texture files picked from other folders next to the `.ani` file, because the format stores only the file name.
 - **Fixes:** the port's bug fixes ([changes-from-1998.md](changes-from-1998.md)) did not change the format. A few behaviour changes alter how some existing files play back, as described there.
+
+## The Overbryce 2.1 extension block
+
+Overbryce 2.1 adds values that the 1998 format has no room for: the [modern renderer](modern-rendering.md) settings, and per-element reflectivity, refractive index, glow and "casts shadows". It stores them **after** `KoniecAnimacie`, in a block of its own.
+
+```text
+...
+KoniecAnimacie
+Overbryce2 1
+Modern enabled=1 bloomStrength=0.6 shadowMapSize=2048 ;
+Element 0 2 glow=2.5 shadows=0 ;
+Element 0 3.1 reflectivity=0.35 ;
+Element 4 5.0.2 ior=1.45 ;
+EndOverbryce2
+```
+
+### Grammar
+
+```text
+block   := "Overbryce2" version  record*  "EndOverbryce2"
+record  := kind  token*  ";"
+Modern  := "Modern"  key=value*
+Element := "Element"  state  path  key=value*
+```
+
+- `version` is the writer's version, currently `1`. Later versions keep this record syntax, so a reader does not need to check the version.
+- `state` is the 0-based index of the key state.
+- `path` gives the child indices from the key state down to the element, joined by `.`. For example, `3.1` is the second child of the fourth element.
+- Only values that differ from the defaults are written. A file with no modern data has no block at all, so it is written byte for byte as before.
+
+### Keys
+
+| Record | Key | Type | Default | Meaning |
+|---|---|---|---|---|
+| `Modern` | `enabled` | 0/1 | 0 | open the animation in modern mode |
+| | `exposure` | float | 1 | brightness before tone mapping |
+| | `bloom`, `bloomStrength`, `bloomThreshold` | 0/1, float, float | 1, 0.5, 0.9 | glow of bright parts |
+| | `shadows`, `shadowSoftness`, `shadowLights`, `shadowMapSize` | 0/1, float, int, int | 1, 1, 4, 1024 | shadow maps |
+| | `ao`, `aoRadius`, `aoStrength` | 0/1, float, float | 1, 0.5, 1 | ambient occlusion |
+| | `reflections`, `probes`, `probeSize` | 0/1, int, int | 1, 4, 256 | reflection probes |
+| `Element` | `reflectivity` | float 0..1 | 0 | mirror-like reflection |
+| | `ior` | float ≥ 1 | 1 | refractive index; above 1 the element is glass |
+| | `glow` | float ≥ 0 | 1 | multiplier of the emission colour |
+| | `shadows` | 0/1 | 1 | the element casts shadows; on a light, the light casts shadows |
+
+### Compatibility
+
+- **Backward compatibility.** The 1998 program and Overbryce 2.0 stop reading at `KoniecAnimacie`, so they open a 2.1 file and simply do not see the block. Everything before the block is the original format; a test checks this.
+- **Forward compatibility.** Overbryce 2.1 opens files from later versions:
+  - unknown records, and unknown keys in `Modern` and `Element` records, are kept and written back unchanged;
+  - values it cannot parse are ignored, so the default stays;
+  - out-of-range values are clamped;
+  - a damaged or truncated block keeps what was read before the damage.
+- **Stale records.** If an older version edits a 2.1 file, it drops the block when it saves. If the block survives but the element it names no longer exists, the record is dropped.

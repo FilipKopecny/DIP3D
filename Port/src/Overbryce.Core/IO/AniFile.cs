@@ -43,6 +43,9 @@ public static class AniFile
 
         if (animation.Scenes.Count == 0)
             throw new AniFormatException("The animation contains no key state.");
+
+        // Overbryce 2.1 settings follow the end tag, where older versions stop reading
+        AniExtensions.Read(r, animation);
         return animation;
     }
 
@@ -54,7 +57,7 @@ public static class AniFile
         w.Write(animation.Fps);
         foreach (var scene in animation.Scenes) scene.Write(w);
         w.Write(AniTags.AnimationEnd);
-        return w.ToString();
+        return w + AniExtensions.Write(animation);
     }
 
     /// <summary>Reads child elements into <paramref name="group"/> until <paramref name="endTag"/>.</summary>

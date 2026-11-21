@@ -84,6 +84,16 @@ The manta flock that follows the pair changes its element names at two camera cu
 
 The jungle has about 2,700 elements in the busiest key state. To keep the file and the rendering manageable, the generator samples the cameras every 0.1 s and at every key state, and leaves out each scenery group that no camera sees between a key state and the next: outside the view, beyond the fog, or behind the moon's horizon. The file is about 37 MB. The jungle shots render at roughly 10 frames per second, so the editor plays them slower than real time; rendered to video, the film runs at full speed.
 
+## Modern rendering
+
+Lumina opens in the classic 1998 look. Press Ctrl+M, or render with `--modern`, to see it with the [modern renderer](../../docs/modern-rendering.md). The generator sets the 2.1 element properties where they matter:
+
+- **Glow:** the sun, the lamp, the antenna light and the portal's runes glow strongly enough to bloom, and they cast no shadows.
+- **Reflectivity:** the astronaut's visor reflects the surroundings.
+- **Glass:** the crystals (refractive index 1.45) and the bubbles under the sea (1.33).
+
+The jungle floor, the seabed and the gas giant also show shadows and ambient occlusion. These values are in the file's extension block, which older versions ignore.
+
 ## Textures
 
 None were downloaded. They come from two sources:

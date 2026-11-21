@@ -608,8 +608,8 @@ internal static class Planet
             var axis = Vector3.Normalize(up * MathF.Cos(lean) + (side * MathF.Cos(dir) + side2 * MathF.Sin(dir)) * MathF.Sin(lean));
             float h = (k == 0 ? 1.1f : 0.5f + 0.45f * Rnd(m.Seed, 70 + k)) * m.Size, r = (k == 0 ? 0.16f : 0.09f) * m.Size;
             var color = k % 3 == 2 ? CrystalTints[(m.Seed + k) % CrystalTints.Length] : m.Tint;
-            var spike = Mat(new ConeElement($"{id}c{k}") { BaseRadius = r, TopRadius = 0, Height = h, QualityX = 6, QualityY = 1 },
-                WithAlpha(color, 0.8f), "KrystalLum.bmp", ambient: 0.4f, emission: Mul(color, pulse), spec: 1f, shine: 0.85f);
+            var spike = Glass(Mat(new ConeElement($"{id}c{k}") { BaseRadius = r, TopRadius = 0, Height = h, QualityX = 6, QualityY = 1 },
+                WithAlpha(color, 0.8f), "KrystalLum.bmp", ambient: 0.4f, emission: Mul(color, pulse), spec: 1f, shine: 0.85f));
             parent.Add(Place(PointZ(spike, axis), foot));
         }
     }

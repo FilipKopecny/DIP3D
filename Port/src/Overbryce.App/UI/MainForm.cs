@@ -29,6 +29,7 @@ internal sealed class MainForm : Form
     private readonly EditorCamera _editor = new();
     private ViewMode _viewMode = ViewMode.Front;
     private bool _wireframe;
+    private bool _modernView;
     private float? _previewTime;
     private readonly RenderSettings _settings = new();
     private readonly Dictionary<string, string> _textureLookup = new(StringComparer.OrdinalIgnoreCase);
@@ -61,6 +62,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripStatusLabel _warningStatus = new();
 
     private ToolStripMenuItem _wireItem = null!;
+    private ToolStripMenuItem _modernItem = null!;
     private readonly Dictionary<ViewMode, ToolStripMenuItem> _viewItems = new();
     private readonly Dictionary<string, Image?> _toolImages = new(StringComparer.OrdinalIgnoreCase);
 
@@ -137,6 +139,8 @@ internal sealed class MainForm : Form
                     View = view,
                     Projection = proj,
                     ResolveTexture = ResolveTexture,
+                    Modern = (req.Modern ?? _animation.Modern.Enabled) ? _animation.Modern : null,
+                    Samples = 8,
                 }, req.Size.Width, req.Size.Height);
                 using var bmp = target.ReadBitmap();
                 bmp.Save(path, path.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ? ImageFormat.Bmp : ImageFormat.Png);
@@ -224,6 +228,8 @@ internal sealed class MainForm : Form
         var view = new ToolStripMenuItem("&View");
         _wireItem = Item("&Wire frame", Keys.Control | Keys.W, (_, _) => { _wireframe = !_wireframe; UpdateViewChecks(); _gl.Invalidate(); });
         view.DropDownItems.Add(_wireItem);
+        _modernItem = Item("&Modern rendering", Keys.Control | Keys.M, (_, _) => { _modernView = !_modernView; UpdateViewChecks(); UpdateStatus(); _gl.Invalidate(); });
+        view.DropDownItems.Add(_modernItem);
         view.DropDownItems.Add(new ToolStripSeparator());
         AddViewItem(view, "&Camera", ViewMode.Camera, Keys.Control | Keys.D1);
         AddViewItem(view, "&Front", ViewMode.Front, Keys.Control | Keys.D2);
@@ -237,6 +243,7 @@ internal sealed class MainForm : Form
 
         var anim = new ToolStripMenuItem("&Animation");
         anim.DropDownItems.Add(Item("&Settings...", Keys.None, (_, _) => EditAnimationSettings()));
+        anim.DropDownItems.Add(Item("&Modern rendering settings...", Keys.None, (_, _) => EditModernSettings()));
         anim.DropDownItems.Add(Item("&Play / Stop", Keys.F5, (_, _) => TogglePlay(), Tool("render")));
         anim.DropDownItems.Add(Item("&Compute frames (export)...", Keys.None, (_, _) => ExportFrames()));
 
@@ -526,6 +533,8 @@ internal sealed class MainForm : Form
                 View = view,
                 Projection = proj,
                 ResolveTexture = ResolveTexture,
+                Modern = _modernView ? _animation.Modern : null,
+                Samples = 4,
             }, w, h);
             _gl.SwapBuffers();
 
@@ -1078,6 +1087,7 @@ internal sealed class MainForm : Form
     {
         foreach (var (mode, item) in _viewItems) item.Checked = mode == _viewMode;
         _wireItem.Checked = _wireframe;
+        _modernItem.Checked = _modernView;
     }
 
     // ==================================================================================== timeline & playback
@@ -1226,6 +1236,8 @@ internal sealed class MainForm : Form
         _currentScene = animation.Scenes[0];
         _selected = _currentScene;
         _textureLookup.Clear();
+        _modernView = animation.Modern.Enabled;
+        UpdateViewChecks();
         if (_renderer != null)
         {
             _gl.MakeCurrent();
@@ -1304,6 +1316,21 @@ internal sealed class MainForm : Form
         RebuildTree();
     }
 
+    /// <summary>The modern renderer's settings of this animation; the view switches to modern rendering to show them.</summary>
+    private void EditModernSettings()
+    {
+        if (!ModernSettingsDialog.Show(this, _animation.Modern, () => { _modernView = true; UpdateViewChecks(); UpdateStatus(); RenderView(); }))
+        {
+            _gl.Invalidate();
+            return;
+        }
+        _modernView = true;
+        UpdateViewChecks();
+        UpdateStatus();
+        MarkDirty();
+        _gl.Invalidate();
+    }
+
     // ==================================================================================== export
 
     /// <summary>
@@ -1356,6 +1383,8 @@ internal sealed class MainForm : Form
                     View = view,
                     Projection = proj,
                     ResolveTexture = ResolveTexture,
+                    Modern = _modernView ? _animation.Modern : null,
+                    Samples = _settings.Antialias ? 8 : 0,
                 }, size.Width, size.Height);
                 using var bmp = target.ReadBitmap();
                 string name = $"{stem}{i:000000}{ext}";
@@ -1402,7 +1431,7 @@ internal sealed class MainForm : Form
         _stateStatus.Text = _previewTime is float t
             ? $"Preview at {t:0.00} s"
             : $"Key state {index + 1} / {_animation.Scenes.Count}  ({_currentScene.Name}, {_currentScene.AniTime:0.###} s)";
-        _viewStatus.Text = (_wireframe ? "Wire frame, " : "") + _viewMode switch
+        _viewStatus.Text = (_wireframe ? "Wire frame, " : _modernView ? "Modern, " : "") + _viewMode switch
         {
             ViewMode.Camera => "camera view",
             ViewMode.Front => "front view",
@@ -1422,7 +1451,7 @@ internal sealed class MainForm : Form
             "Tree: select key states and elements, F2 renames, Del deletes, drag to move into another group/state (Ctrl+drag copies).\r\n" +
             "Elements with the same name in neighbouring key states are interpolated (Catmull-Rom spline over the key-state times).\r\n\r\n" +
             "View: click an object to select it, Alt+click selects its group (repeat to go further up), click the background to select the key state.\r\n" +
-            "Left-drag orbits the editor camera, mouse wheel zooms (front/side/top views). Ctrl+1..4 switch views, Ctrl+W toggles wire frame.\r\n" +
+            "Left-drag orbits the editor camera, mouse wheel zooms (front/side/top views). Ctrl+1..4 switch views, Ctrl+W toggles wire frame, Ctrl+M modern rendering.\r\n" +
             "In the wire frame view lights (yellow) and cameras (green, active cyan) are shown and can be clicked too.\r\n" +
             "'Stop at this state' (Final) makes an element come to rest at that key state; otherwise it moves smoothly through it.\r\n" +
             "PgDn on the last key state creates a copy 5 s later; edit it to define the motion.\r\n\r\n" +

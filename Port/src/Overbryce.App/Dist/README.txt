@@ -1,8 +1,11 @@
-Overbryce Animator 2.0
+Overbryce Animator 2.1
 ======================
 
 A key-frame 3D animation editor: a port of Overbryce Animator 1.0 (1998) to .NET 10 and OpenGL 3.3.
 This build is self-contained: no .NET installation is needed.
+
+New in 2.1: a modern renderer next to the classic 1998 look, with shadows, reflections, glass,
+glow (bloom) and ambient occlusion. Files stay readable by the 1998 program and by 2.0.
 
 Requirements: Windows 10 or 11 (x64) and a graphics card with OpenGL 3.3.
 
@@ -24,6 +27,8 @@ Controls
 
 Click an object in the 3D view      select it (Alt+click: the enclosing group)
 Ctrl+1 .. Ctrl+4                    camera, front, side or top view
+Ctrl+M                              classic or modern rendering (Animation > Modern rendering
+                                    settings: shadows, reflections, glow, ambient occlusion)
 Left-drag / mouse wheel             orbit / zoom the front, side and top views
 F5                                  play or stop
 Drag the timeline                   preview any moment of the animation
@@ -43,7 +48,12 @@ Every frame of the animation, as PNG files:
 
   Overbryce.exe Scenes\Lumina\Lumina.ani --frames frames --size 1280x720
 
-Other options: --from and --to (seconds), --view camera|front|side|top, --wire.
+Other options: --from and --to (seconds), --view camera|front|side|top, --wire,
+--modern or --classic (the renderer; without either, the animation's own setting).
+
+The modern look of Lumina:
+
+  Overbryce.exe Scenes\Lumina\Lumina.ani --snapshot lumina.png --time 54 --size 1280x720 --modern
 
 A Blender scene (needs Blender installed; writes LuminaBlender\Lumina.blend):
 

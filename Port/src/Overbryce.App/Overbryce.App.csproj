@@ -10,7 +10,7 @@
     <RootNamespace>Overbryce.App</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Product>Overbryce Animator</Product>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon></ApplicationIcon>
   </PropertyGroup>

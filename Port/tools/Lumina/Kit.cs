@@ -36,8 +36,11 @@ internal static class Kit
         return e;
     }
 
-    /// <summary>Self-lit material: only the emission colour (times the texture) is visible.</summary>
-    public static T Glow<T>(T e, Rgba color, float alpha = 1f, string? tex = null) where T : Element
+    /// <summary>
+    /// Self-lit material: only the emission colour (times the texture) is visible. In the modern renderer
+    /// it casts no shadow (it stands for light itself) and <paramref name="glow"/> above 1 makes it shine.
+    /// </summary>
+    public static T Glow<T>(T e, Rgba color, float alpha = 1f, string? tex = null, float glow = 1f) where T : Element
     {
         e.Diffuse = new Rgba(0, 0, 0, alpha);
         e.Ambient = Black;
@@ -45,6 +48,15 @@ internal static class Kit
         e.Emission = new Rgba(color.R, color.G, color.B, 1);
         e.Shininess = 0;
         e.Texture = tex;
+        e.CastsShadows = false;
+        e.Glow = glow;
+        return e;
+    }
+
+    /// <summary>Modern renderer: a see-through element bends the light like glass (or water).</summary>
+    public static T Glass<T>(T e, float refractiveIndex = 1.45f) where T : Element
+    {
+        e.RefractiveIndex = refractiveIndex;
         return e;
     }
 

@@ -16,8 +16,8 @@ internal static class Program
             new EditorAttribute(typeof(RgbaEditor), typeof(UITypeEditor)));
 
         // Overbryce.exe file.ani
-        // Overbryce.exe file.ani --snapshot out.png [--time 12.5] [--view camera|front|side|top] [--wire] [--size 800x600]
-        // Overbryce.exe file.ani --frames outFolder [--from 0] [--to 10] [--view ...] [--wire] [--size 1280x720]
+        // Overbryce.exe file.ani --snapshot out.png [--time 12.5] [--view camera|front|side|top] [--wire] [--size 800x600] [--modern|--classic]
+        // Overbryce.exe file.ani --frames outFolder [--from 0] [--to 10] [--view ...] [--wire] [--size 1280x720] [--modern|--classic]
         // Overbryce.exe file.ani --blender outFolder [--no-blend]
         string? file = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
         int b = Array.IndexOf(args, "--blender");
@@ -57,7 +57,8 @@ internal static class Program
                 new Size(int.Parse(size[0]), int.Parse(size[1])),
                 Frames: s < 0,
                 From: Num("--from"),
-                To: Num("--to"));
+                To: Num("--to"),
+                Modern: args.Contains("--modern") ? true : args.Contains("--classic") ? false : null);
         }
 
         Application.Run(new MainForm(file, snapshot));

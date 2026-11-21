@@ -1,4 +1,4 @@
-# Overbryce Animator 2.0
+# Overbryce Animator 2.1
 
 This is a key-frame 3D animation editor for current Windows, built on .NET 10 and OpenGL 3.3. It is a port of **Overbryce Animator 1.0**, written in 1998 by Tomáš Kopečný for the diploma thesis *Simulácia virtuálnej reality pomocou OpenGL – animácia scény*. The thesis was submitted at FEI STU Bratislava; the original program was built with Borland C++ Builder 3 and OpenGL 1.1.
 
@@ -22,6 +22,22 @@ The basic workflow:
 
 ![Lumina: the astronaut meets the creature in the crystal grove](docs/images/lumina-meeting.png)
 
+### New in 2.1: modern rendering
+
+Next to the classic 1998 look there is now a modern renderer (View › Modern rendering, Ctrl+M) with:
+
+- HDR lighting with bloom;
+- soft shadows from up to four lights;
+- ambient occlusion;
+- reflections and refracting glass;
+- glowing materials.
+
+Elements get four new properties for it: *Reflectivity*, *Refractive index*, *Glow* and *Casts shadows*. They are stored after the end of the original file format, so the 1998 program and version 2.0 still open the files. See [Modern rendering](docs/modern-rendering.md).
+
+| Classic | Modern |
+|---|---|
+| ![Lumina at 46 s, classic](docs/images/lumina-46-classic.png) | ![Lumina at 46 s, modern](docs/images/lumina-46-modern.png) |
+
 ## Features
 
 - **Elements:**
@@ -42,10 +58,13 @@ The basic workflow:
   - **Click selection in the 3D view.**
   - Orbitable front, side and top views.
   - Timeline with live preview and real-time playback.
+- **Rendering:**
+  - Classic: the OpenGL 1.1 look of 1998, emulated with shaders.
+  - Modern: HDR, bloom, shadow maps, ambient occlusion, reflection probes, glass and glow.
 - **Output:**
   - Off-screen frame export at up to 1920×1080 with multisampling.
   - Command-line rendering of a single picture or of every frame.
-- **Compatibility:** reads and writes the original `.ani` format, so files open in both programs.
+- **Compatibility:** reads and writes the original `.ani` format, so files open in both programs. The 2.1 additions go after the end of the original format, where older versions stop reading.
 
 ## Requirements
 
@@ -92,10 +111,12 @@ To share it, zip that folder. Before you publish again, close any copy of `Overb
 ### Command line
 
 ```text
-Overbryce.exe [file.ani] [--snapshot out.png] [--time seconds] [--view camera|front|side|top] [--wire] [--size WxH]
-Overbryce.exe file.ani --frames folder [--from seconds] [--to seconds] [--view ...] [--wire] [--size WxH]
+Overbryce.exe [file.ani] [--snapshot out.png] [--time seconds] [--view camera|front|side|top] [--wire] [--size WxH] [--modern|--classic]
+Overbryce.exe file.ani --frames folder [--from seconds] [--to seconds] [--view ...] [--wire] [--size WxH] [--modern|--classic]
 Overbryce.exe file.ani --blender folder [--no-blend]
 ```
+
+`--modern` and `--classic` choose the renderer. Without either, the animation's own setting (*Open in modern mode*) decides.
 
 With `--snapshot`, Overbryce renders one picture and exits without opening the editor:
 
@@ -125,6 +146,7 @@ Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
 | Orbit or zoom an editor view | Left-drag or mouse wheel (front, side and top views) |
 | Camera, front, side or top view | Ctrl+1 … Ctrl+4 |
 | Wire frame on/off | Ctrl+W |
+| Classic or modern rendering | Ctrl+M (settings: *Animation › Modern rendering settings*) |
 | Previous or next key state | PgUp / PgDn (PgDn on the last state adds a copy 5 s later) |
 | First or last key state | Ctrl+Home / Ctrl+End |
 | Duplicate or delete the key state | Ctrl+D / Ctrl+Del |
@@ -151,8 +173,8 @@ More about selection and the other tools:
 | Path | Content |
 |---|---|
 | `src/Overbryce.Core` | UI-free model: elements, groups, key states, the animation, interpolation, transforms, and the `.ani` reader and writer |
-| `src/Overbryce.App` | WinForms editor, the OpenGL renderer (a shader that emulates the GL 1.1 fixed-function pipeline), picking, and frame export |
-| `tests/Overbryce.Core.Tests` | xUnit tests: loading all 7 original sample files and Lumina, save and reload with identical output, interpolation and camera maths |
+| `src/Overbryce.App` | WinForms editor, the OpenGL renderer (a shader that emulates the GL 1.1 fixed-function pipeline, and the modern passes), picking, and frame export |
+| `tests/Overbryce.Core.Tests` | xUnit tests: loading all 7 original sample files and Lumina, save and reload with identical output, the 2.1 extension block, interpolation and camera maths |
 | `samples/Lumina` | The Lumina animation and its textures |
 | `tools/Lumina` | The generator that writes `samples/Lumina` through `Overbryce.Core` |
 | `docs/` | Documentation |
@@ -169,7 +191,10 @@ The model classes follow the original ones:
 ## Documentation
 
 - [docs/animation-model.md](docs/animation-model.md): how frames are computed, covering key states, element matching, the spline, stopping, permanent motion and the transform hierarchy.
-- [docs/ani-format.md](docs/ani-format.md): the `.ani` file format.
+- [docs/ani-format.md](docs/ani-format.md): the `.ani` file format, including the 2.1 extension block.
+- [docs/modern-rendering.md](docs/modern-rendering.md): the modern renderer, its settings and the new element properties.
+- [docs/raytracing-plan.md](docs/raytracing-plan.md): the plan for an offline ray tracer (not implemented yet).
+- [docs/blender-export.md](docs/blender-export.md): exporting an animation to Blender.
 - [docs/changes-from-1998.md](docs/changes-from-1998.md): bugs fixed in the port, behaviour that differs from the original, and what was kept on purpose.
 - [docs/port-overview.md](docs/port-overview.md): how the port was made, in brief.
 - [docs/thesis-evaluation.md](docs/thesis-evaluation.md): an evaluation of the 1998 thesis and its software, by the standards of its time.

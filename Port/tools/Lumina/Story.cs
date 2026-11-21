@@ -189,7 +189,7 @@ internal sealed partial class Story
     private void Sun()
     {
         var p = SunDir * 63;
-        var sun = Glow(new SphereElement("Slnko") { Radius = 2.4, QualityX = 24, QualityY = 16 }, C(1f, 0.97f, 0.88f));
+        var sun = Glow(new SphereElement("Slnko") { Radius = 2.4, QualityX = 24, QualityY = 16 }, C(1f, 0.97f, 0.88f), glow: 2.5f);
         Place(sun, p);
         scene.Add(sun);
         float[] radii = [3.6f, 5.2f, 7.5f];
@@ -489,10 +489,10 @@ internal sealed partial class Story
         // Rz tilts +Y towards +X, then Ry turns that direction to 'dir'; the group pivots at its parent's origin
         var g = new GroupElement(name) { Gamma = -tilt, Beta = dir - 90 };
         var look = WithAlpha(color, 0.8f);
-        g.Add(Mat(new ConeElement(name + "H") { BaseRadius = r, TopRadius = r * 0.92f, Height = h, QualityX = 6, QualityY = 1, Alpha = -90 },
-            look, "KrystalLum.bmp", ambient: 0.4f, emission: Mul(color, glow), spec: 1f, shine: 0.85f));
-        g.Add(Mat(new ConeElement(name + "S") { BaseRadius = r * 0.92f, TopRadius = 0, Height = r * 1.9f, QualityX = 6, QualityY = 1, Alpha = -90, Y = h },
-            look, "KrystalLum.bmp", ambient: 0.4f, emission: Mul(color, glow * 1.15f), spec: 1f, shine: 0.85f));
+        g.Add(Glass(Mat(new ConeElement(name + "H") { BaseRadius = r, TopRadius = r * 0.92f, Height = h, QualityX = 6, QualityY = 1, Alpha = -90 },
+            look, "KrystalLum.bmp", ambient: 0.4f, emission: Mul(color, glow), spec: 1f, shine: 0.85f)));
+        g.Add(Glass(Mat(new ConeElement(name + "S") { BaseRadius = r * 0.92f, TopRadius = 0, Height = r * 1.9f, QualityX = 6, QualityY = 1, Alpha = -90, Y = h },
+            look, "KrystalLum.bmp", ambient: 0.4f, emission: Mul(color, glow * 1.15f), spec: 1f, shine: 0.85f)));
         parent.Add(g);
     }
 
@@ -863,19 +863,20 @@ internal sealed partial class Story
         head.Add(helmet);
         var visor = Mat(new SphereElement("Hledi") { Radius = 0.24, QualityX = 24, QualityY = 18, Alpha = -90 },
             C(1f, 0.85f, 0.55f), "Hledi.bmp", ambient: 0.5f, emission: C(0.18f, 0.12f, 0.05f), spec: 1f, shine: 0.9f);
+        visor.Reflectivity = 0.35f; // a golden mirror in the modern renderer
         Place(visor, new Vector3(0, 0.25f, 0.1f));
         head.Add(visor);
         var lamp = Metal(new ConeElement("Lampa") { BaseRadius = 0.045, TopRadius = 0.05, Height = 0.1, QualityX = 10, QualityY = 1 }, 0.55f);
         Place(lamp, new Vector3(0.22f, 0.36f, 0.12f));
         head.Add(lamp);
         var lampGlass = Glow(new DiskElement("LampaSklo") { InnerRadius = 0, OuterRadius = 0.048, SweepAngle = 360, QualityX = 12, QualityY = 1 },
-            Mul(C(1f, 0.95f, 0.8f), 0.2f + 0.78f * p.Lamp));
+            Mul(C(1f, 0.95f, 0.8f), 0.2f + 0.78f * p.Lamp), glow: 3f);
         Place(lampGlass, new Vector3(0.22f, 0.36f, 0.222f));
         head.Add(lampGlass);
         var antenna = Metal(new ConeElement("AntenaPrilby") { BaseRadius = 0.012, TopRadius = 0.008, Height = 0.22, QualityX = 6, QualityY = 1, Alpha = -90 });
         Place(antenna, new Vector3(-0.16f, 0.46f, -0.08f));
         head.Add(antenna);
-        var blink = Glow(new SphereElement("AntenaSvetlo") { Radius = 0.03, QualityX = 8, QualityY = 6 }, Mul(C(1f, 0.25f, 0.2f), 0.35f + 0.6f * MathF.Max(0, Wave(t, 1f, 0.25f))));
+        var blink = Glow(new SphereElement("AntenaSvetlo") { Radius = 0.03, QualityX = 8, QualityY = 6 }, Mul(C(1f, 0.25f, 0.2f), 0.35f + 0.6f * MathF.Max(0, Wave(t, 1f, 0.25f))), glow: 2.5f);
         Place(blink, new Vector3(-0.16f, 0.69f, -0.08f));
         head.Add(blink);
         head.Add(Light("SvetloPrilba", LampPosition, Mul(C(1f, 0.95f, 0.82f), p.LampPower * p.Lamp), dir: LampDirection,

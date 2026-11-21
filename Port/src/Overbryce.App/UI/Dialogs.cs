@@ -6,7 +6,7 @@ namespace Overbryce.App.UI;
 /// (<see cref="Output"/> is a folder).
 /// </summary>
 internal sealed record SnapshotRequest(string Output, float? Time, Rendering.ViewMode View, bool Wireframe, Size Size,
-    bool Frames = false, float? From = null, float? To = null);
+    bool Frames = false, float? From = null, float? To = null, bool? Modern = null);
 
 /// <summary>Settings of the original "Gen. settings" dialog (TGenSettings).</summary>
 internal sealed class RenderSettings
@@ -89,6 +89,43 @@ internal static class SettingsDialog
     }
 }
 
+/// <summary>
+/// The modern renderer's settings of the animation (new in 2.1). Changes are shown at once; Cancel
+/// restores the previous values.
+/// </summary>
+internal static class ModernSettingsDialog
+{
+    public static bool Show(IWin32Window owner, Core.Model.ModernSettings settings, Action preview)
+    {
+        var original = settings.Clone();
+        using var form = DialogLayout.CreateDialog("Modern rendering settings", 440, 560);
+        var grid = new PropertyGrid
+        {
+            Dock = DockStyle.Fill,
+            SelectedObject = settings,
+            ToolbarVisible = false,
+            HelpVisible = true,
+            PropertySort = PropertySort.Categorized,
+        };
+        grid.PropertyValueChanged += (_, _) =>
+        {
+            settings.Normalize();
+            grid.Refresh();
+            preview();
+        };
+        form.Controls.Add(grid);
+        form.Controls.Add(DialogLayout.Buttons(form));
+        form.Shown += (_, _) => preview();
+        if (form.ShowDialog(owner) == DialogResult.OK)
+        {
+            settings.Normalize();
+            return true;
+        }
+        settings.CopyFrom(original);
+        return false;
+    }
+}
+
 internal static class AnimationSettingsDialog
 {
     /// <summary>Original "Animation settings": the frame rate (1..128).</summary>
@@ -123,7 +160,7 @@ internal static class AboutDialog
                 "Overbryce Animator v1.0\r\n" +
                 "Tomáš Kopečný, FEI STU Bratislava, 1998\r\n" +
                 "Diploma thesis: key-frame animation with OpenGL\r\n\r\n" +
-                "Port v2.0 for Windows / .NET 10 / OpenGL 3.3 core.\r\n" +
+                "Port v2.1 for Windows / .NET 10 / OpenGL 3.3 core.\r\n" +
                 "The animation model, the .ani file format and the Catmull-Rom\r\n" +
                 "key-frame interpolation are carried over from the original\r\n" +
                 "Borland C++ Builder application; the fixed-function OpenGL 1.1\r\n" +
