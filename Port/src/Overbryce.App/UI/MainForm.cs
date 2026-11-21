@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Numerics;
@@ -127,9 +127,28 @@ internal sealed class MainForm : Form
             var editor = new EditorCamera();
             editor.Reset(req.View);
             using var target = new OffscreenTarget(req.Size.Width, req.Size.Height, 8);
+            RaytraceBridge? bridge = null;
+            var traceSettings = _animation.Raytrace.Clone();
+            if (req.Samples is int samples) traceSettings.Samples = samples;
+            if (req.Bounces is int bounces) traceSettings.Bounces = bounces;
+            traceSettings.Normalize();
 
-            void RenderTo(Scene? scene, string path)
+            void RenderTo(Scene? scene, float? time, int frame, string path)
             {
+                if (req.Raytrace && !req.Wireframe && scene != null)
+                {
+                    bridge ??= new RaytraceBridge(ResolveTexture);
+                    var job = bridge.Prepare(_animation, scene, time, req.View, editor, req.Size.Width, req.Size.Height,
+                        _settings.AlphaBlend, classic: req.Modern == false, traceSettings, (uint)frame);
+                    job.Trace(traceSettings.Samples);
+                    using (var traced = RaytraceBridge.ToBitmap(job.Resolve()))
+                        traced.Save(path, path.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ? ImageFormat.Bmp : ImageFormat.Png);
+                    var st = job.Stats;
+                    req.Log?.Invoke($"{Path.GetFileName(path)}: {st.Elements} elements, {st.Triangles} triangles, " +
+                                    $"{st.Samples} samples, {(st.Prepare + st.Trace).TotalSeconds:0.0} s");
+                    return;
+                }
+
                 var (view, proj) = ViewSetup.Compute(scene, req.View, editor, req.Size.Width, req.Size.Height, out _);
                 target.Bind();
                 _renderer.Render(scene, new RenderOptions
@@ -148,7 +167,7 @@ internal sealed class MainForm : Form
 
             if (!req.Frames)
             {
-                RenderTo(req.Time is float t ? _animation.Evaluate(t) : _currentScene, req.Output);
+                RenderTo(req.Time is float t ? _animation.Evaluate(t) : _currentScene, req.Time, 0, req.Output);
                 return true;
             }
 
@@ -157,13 +176,14 @@ internal sealed class MainForm : Form
             for (int i = 0; i < times.Count; i++)
             {
                 if (times[i] < (req.From ?? float.MinValue) - 1e-4f || times[i] > (req.To ?? float.MaxValue) + 1e-4f) continue;
-                RenderTo(_animation.Evaluate(times[i]), Path.Combine(req.Output, $"{_animation.Name}{i:000000}.png"));
+                RenderTo(_animation.Evaluate(times[i]), times[i], i, Path.Combine(req.Output, $"{_animation.Name}{i:000000}.png"));
             }
             return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             File.WriteAllText(req.Output + ".error.txt", ex.ToString());
+            req.Log?.Invoke("Rendering failed: " + ex.Message);
             return false;
         }
     }
@@ -230,6 +250,7 @@ internal sealed class MainForm : Form
         view.DropDownItems.Add(_wireItem);
         _modernItem = Item("&Modern rendering", Keys.Control | Keys.M, (_, _) => { _modernView = !_modernView; UpdateViewChecks(); UpdateStatus(); _gl.Invalidate(); });
         view.DropDownItems.Add(_modernItem);
+        view.DropDownItems.Add(Item("&Ray trace this view", Keys.F9, (_, _) => RaytraceView()));
         view.DropDownItems.Add(new ToolStripSeparator());
         AddViewItem(view, "&Camera", ViewMode.Camera, Keys.Control | Keys.D1);
         AddViewItem(view, "&Front", ViewMode.Front, Keys.Control | Keys.D2);
@@ -244,6 +265,10 @@ internal sealed class MainForm : Form
         var anim = new ToolStripMenuItem("&Animation");
         anim.DropDownItems.Add(Item("&Settings...", Keys.None, (_, _) => EditAnimationSettings()));
         anim.DropDownItems.Add(Item("&Modern rendering settings...", Keys.None, (_, _) => EditModernSettings()));
+        anim.DropDownItems.Add(Item("&Ray tracing settings...", Keys.None, (_, _) =>
+        {
+            if (RaytraceSettingsDialog.Show(this, _animation.Raytrace)) MarkDirty();
+        }));
         anim.DropDownItems.Add(Item("&Play / Stop", Keys.F5, (_, _) => TogglePlay(), Tool("render")));
         anim.DropDownItems.Add(Item("&Compute frames (export)...", Keys.None, (_, _) => ExportFrames()));
 
@@ -1366,36 +1391,59 @@ internal sealed class MainForm : Form
         Enabled = false;
         var cancelHook = new KeyEventHandler((_, e) => { if (e.KeyCode == Keys.Escape) _exportCancel = true; });
         KeyDown += cancelHook;
+        bool trace = _settings.Renderer == ExportRenderer.RayTraced && !_wireframe;
+        bool modern = _settings.Renderer switch
+        {
+            ExportRenderer.Classic => false,
+            ExportRenderer.Modern => true,
+            _ => _modernView,
+        };
+        var bridge = trace ? new RaytraceBridge(ResolveTexture) : null;
         try
         {
             _gl.MakeCurrent();
             _renderer ??= new SceneRenderer();
             using var target = new OffscreenTarget(size.Width, size.Height, _settings.Antialias ? 8 : 0);
+            var watch = Stopwatch.StartNew();
             for (int i = 0; i < times.Count && !_exportCancel; i++)
             {
                 var scene = _animation.Evaluate(times[i]);
-                var (view, proj) = ViewSetup.Compute(scene, ViewMode.Camera, _editor, size.Width, size.Height, out _);
-                target.Bind();
-                _renderer.Render(scene, new RenderOptions
-                {
-                    Wireframe = _wireframe,
-                    AlphaBlend = _settings.AlphaBlend,
-                    View = view,
-                    Projection = proj,
-                    ResolveTexture = ResolveTexture,
-                    Modern = _modernView ? _animation.Modern : null,
-                    Samples = _settings.Antialias ? 8 : 0,
-                }, size.Width, size.Height);
-                using var bmp = target.ReadBitmap();
                 string name = $"{stem}{i:000000}{ext}";
-                bmp.Save(Path.Combine(dir, name), format);
+                if (bridge != null)
+                {
+                    var job = bridge.Prepare(_animation, scene, times[i], ViewMode.Camera, _editor, size.Width, size.Height,
+                        _settings.AlphaBlend, classic: false, _animation.Raytrace, (uint)i);
+                    if (!TraceWithEvents(job, _animation.Raytrace.Samples, p =>
+                            _warningStatus.Text = $"Ray tracing frame {i + 1} / {times.Count}: {p:0%} (Esc cancels)..."))
+                        break;
+                    using var traced = RaytraceBridge.ToBitmap(job.Resolve());
+                    traced.Save(Path.Combine(dir, name), format);
+                }
+                else
+                {
+                    var (view, proj) = ViewSetup.Compute(scene, ViewMode.Camera, _editor, size.Width, size.Height, out _);
+                    target.Bind();
+                    _renderer.Render(scene, new RenderOptions
+                    {
+                        Wireframe = _wireframe,
+                        AlphaBlend = _settings.AlphaBlend,
+                        View = view,
+                        Projection = proj,
+                        ResolveTexture = ResolveTexture,
+                        Modern = modern ? _animation.Modern : null,
+                        Samples = _settings.Antialias ? 8 : 0,
+                    }, size.Width, size.Height);
+                    using var bmp = target.ReadBitmap();
+                    bmp.Save(Path.Combine(dir, name), format);
+                }
                 names.Add(name);
 
                 _warningStatus.Text = $"Exporting frame {i + 1} / {times.Count} (Esc cancels)...";
                 Application.DoEvents();
             }
             File.WriteAllLines(Path.Combine(dir, "list.lst"), names);
-            _warningStatus.Text = (_exportCancel ? "Export cancelled after " : "Exported ") + $"{names.Count} frames to {dir}";
+            _warningStatus.Text = (_exportCancel ? "Export cancelled after " : "Exported ") + $"{names.Count} frames to {dir}" +
+                                  (bridge != null ? $" (ray traced in {watch.Elapsed.TotalSeconds:0} s)" : "");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {
@@ -1408,6 +1456,68 @@ internal sealed class MainForm : Form
             OpenTK.Graphics.OpenGL4.GL.BindFramebuffer(OpenTK.Graphics.OpenGL4.FramebufferTarget.Framebuffer, 0);
             _gl.Invalidate();
         }
+    }
+
+    /// <summary>
+    /// Traces on worker threads while the window keeps handling messages (Esc sets the export's cancel
+    /// flag); returns false when it was cancelled.
+    /// </summary>
+    private bool TraceWithEvents(Raytrace.RaytraceJob job, int samples, Action<float> report)
+    {
+        using var cancel = new CancellationTokenSource();
+        var progress = new LatestProgress();
+        var task = Task.Run(() => job.Trace(samples, progress, cancel.Token), cancel.Token);
+        while (!task.IsCompleted)
+        {
+            Application.DoEvents();
+            if (_exportCancel) cancel.Cancel();
+            report(progress.Value);
+            task.Wait(40);
+        }
+        try
+        {
+            task.GetAwaiter().GetResult();
+            return true;
+        }
+        catch (Exception) when (cancel.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    // ==================================================================================== ray traced view
+
+    private RaytracePreviewForm? _raytraced;
+
+    /// <summary>View > Ray trace this view (F9): the shown state through the shown camera, in its own window.</summary>
+    private void RaytraceView()
+    {
+        StopPlay();
+        Scene? scene = _previewTime is float t ? _animation.Evaluate(t) : _currentScene;
+        int w = Math.Max(16, _gl.ClientSize.Width), h = Math.Max(16, _gl.ClientSize.Height);
+        Raytrace.RaytraceJob job;
+        try
+        {
+            job = new RaytraceBridge(ResolveTexture).Prepare(_animation, scene, _previewTime, _viewMode, _editor, w, h,
+                _settings.AlphaBlend, classic: false, _animation.Raytrace, 0);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _warningStatus.Text = "Ray tracing failed: " + ex.Message;
+            return;
+        }
+
+        if (_raytraced == null || _raytraced.IsDisposed)
+        {
+            _raytraced = new RaytracePreviewForm();
+            _raytraced.Show(this);
+        }
+        else
+        {
+            _raytraced.Activate();
+        }
+        string what = _previewTime is float pt ? $"{pt:0.00} s" : $"key state {_animation.Scenes.IndexOf(_currentScene) + 1}";
+        _raytraced.Start(job, _animation.Raytrace.Samples, $"{what}, {_viewStatus.Text}");
     }
 
     // ==================================================================================== misc
@@ -1452,10 +1562,12 @@ internal sealed class MainForm : Form
             "Elements with the same name in neighbouring key states are interpolated (Catmull-Rom spline over the key-state times).\r\n\r\n" +
             "View: click an object to select it, Alt+click selects its group (repeat to go further up), click the background to select the key state.\r\n" +
             "Left-drag orbits the editor camera, mouse wheel zooms (front/side/top views). Ctrl+1..4 switch views, Ctrl+W toggles wire frame, Ctrl+M modern rendering.\r\n" +
+            "F9 ray traces the view in its own window (reflections, glass, soft shadows; Animation > Ray tracing settings sets the quality).\r\n" +
             "In the wire frame view lights (yellow) and cameras (green, active cyan) are shown and can be clicked too.\r\n" +
             "'Stop at this state' (Final) makes an element come to rest at that key state; otherwise it moves smoothly through it.\r\n" +
             "PgDn on the last key state creates a copy 5 s later; edit it to define the motion.\r\n\r\n" +
-            "Timeline: drag to preview the interpolated animation, F5 plays it. File > Export frames renders BMP/PNG frames through the active camera.",
+            "Timeline: drag to preview the interpolated animation, F5 plays it. File > Export frames renders BMP/PNG frames through the active camera\r\n" +
+            "(File > Rendering settings chooses the renderer: as the view, classic, modern or ray traced).",
             "Controls", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 

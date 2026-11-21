@@ -367,10 +367,15 @@ public sealed class LightElement : Element
     [Category("8 Light"), DisplayName("Linear attenuation")] public double LinearAttenuation { get; set; }
     [Category("8 Light"), DisplayName("Quadratic attenuation")] public double QuadraticAttenuation { get; set; }
 
+    [Category("8 Light"), DisplayName("Radius"), Description("Size of the light as a sphere: above 0 its shadows get soft edges, wider the farther they fall from the object. At 0 the light is a point; a glowing element around it (a sun, a bulb) then lightens the shadows of elements too small to hide it (ray tracing only).")]
+    public float LightRadius { get; set; }
+
     public override void Interpolate(in SplineWeights w, float time, Element prev, Element next, Element nextNext)
     {
         base.Interpolate(w, time, prev, next, nextNext);
         var p = (LightElement)prev; var n = (LightElement)next; var nn = (LightElement)nextNext;
+        LightRadius = Math.Max(0f, w.Interpolate(p.LightRadius, LightRadius, n.LightRadius, nn.LightRadius));
+        if (LightRadius <= NegligibleSurface) LightRadius = 0f; // rounding of the spline, not a size
         SpotCutoff = w.Interpolate(p.SpotCutoff, SpotCutoff, n.SpotCutoff, nn.SpotCutoff);
         if (SpotCutoff > 90) SpotCutoff = 180;
         SpotExponent = w.Interpolate(p.SpotExponent, SpotExponent, n.SpotExponent, nn.SpotExponent);
@@ -414,11 +419,22 @@ public sealed class CameraElement : Element
     [Category("8 Camera"), DisplayName("Active"), Description("The state is rendered through the active camera. Only one camera per state can be active.")]
     public bool Active { get; set; }
 
+    public const float DefaultFocus = 10f;
+
+    [Category("8 Camera"), DisplayName("Aperture"), Description("Radius of the lens in scene units: above 0, what is not at the focus distance gets blurred (depth of field; ray tracing only).")]
+    public float Aperture { get; set; }
+
+    [Category("8 Camera"), DisplayName("Focus distance"), Description("Distance from the camera that is sharp when the aperture is above 0 (ray tracing only).")]
+    public float Focus { get; set; } = DefaultFocus;
+
     public override void Interpolate(in SplineWeights w, float time, Element prev, Element next, Element nextNext)
     {
         base.Interpolate(w, time, prev, next, nextNext);
         var p = (CameraElement)prev; var n = (CameraElement)next; var nn = (CameraElement)nextNext;
         FieldOfView = w.Interpolate(p.FieldOfView, FieldOfView, n.FieldOfView, nn.FieldOfView);
+        Aperture = Math.Max(0f, w.Interpolate(p.Aperture, Aperture, n.Aperture, nn.Aperture));
+        if (Aperture <= NegligibleSurface) Aperture = 0f; // rounding of the spline, not a lens
+        Focus = Math.Max(0.01f, w.Interpolate(p.Focus, Focus, n.Focus, nn.Focus));
     }
 
     internal override void ReadBody(AniTokenReader r)

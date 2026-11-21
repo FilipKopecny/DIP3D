@@ -50,7 +50,8 @@ internal sealed class TextureCache : IDisposable
         }
     }
 
-    private static byte[] LoadPixels(string path)
+    /// <summary>The texture as RGBA bytes, <see cref="Size"/> × <see cref="Size"/>, the bottom row first.</summary>
+    internal static byte[] LoadPixels(string path)
     {
         using var source = new Bitmap(path);
         using var scaled = new Bitmap(Size, Size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);

@@ -18,6 +18,7 @@ internal static class Program
         // Overbryce.exe file.ani
         // Overbryce.exe file.ani --snapshot out.png [--time 12.5] [--view camera|front|side|top] [--wire] [--size 800x600] [--modern|--classic]
         // Overbryce.exe file.ani --frames outFolder [--from 0] [--to 10] [--view ...] [--wire] [--size 1280x720] [--modern|--classic]
+        //   with --raytrace [--samples 64] [--bounces 6] either is ray traced (with --classic: the classic look through the tracer)
         // Overbryce.exe file.ani --blender outFolder [--no-blend]
         string? file = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
         int b = Array.IndexOf(args, "--blender");
@@ -49,6 +50,12 @@ internal static class Program
             string? Opt(string name) { int i = Array.IndexOf(args, name); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
             float? Num(string name) => Opt(name) is { } v ? float.Parse(v, System.Globalization.CultureInfo.InvariantCulture) : null;
             var size = (Opt("--size") ?? "800x600").Split('x');
+            bool raytrace = args.Contains("--raytrace");
+            if (raytrace)
+            {
+                AttachConsole(-1);   // report each traced picture to the console it was started from
+                Console.WriteLine();
+            }
             snapshot = new SnapshotRequest(
                 Path.GetFullPath(args[target + 1]),
                 Num("--time"),
@@ -58,7 +65,11 @@ internal static class Program
                 Frames: s < 0,
                 From: Num("--from"),
                 To: Num("--to"),
-                Modern: args.Contains("--modern") ? true : args.Contains("--classic") ? false : null);
+                Modern: args.Contains("--modern") ? true : args.Contains("--classic") ? false : null,
+                Raytrace: raytrace,
+                Samples: Opt("--samples") is { } sp ? int.Parse(sp, System.Globalization.CultureInfo.InvariantCulture) : null,
+                Bounces: Opt("--bounces") is { } bo ? int.Parse(bo, System.Globalization.CultureInfo.InvariantCulture) : null,
+                Log: raytrace ? Console.WriteLine : null);
         }
 
         Application.Run(new MainForm(file, snapshot));

@@ -5,8 +5,8 @@ using System.Drawing.Imaging;
 using System.Numerics;
 using System.Reflection;
 using System.Text.Json;
-using OpenTK.Graphics.OpenGL4;
 using Overbryce.App.Rendering;
+using Overbryce.Core.Geometry;
 using Overbryce.Core.IO;
 using Overbryce.Core.Model;
 
@@ -488,17 +488,7 @@ internal sealed class BlenderExporter
     {
         var g = new GeometryBuilder();
         var r = new List<DrawRange>();
-        switch (e)
-        {
-            case SphereElement s: g.Sphere(r, s.Radius, s.QualityX, s.QualityY, false); break;
-            case ConeElement c: g.Cylinder(r, c.BaseRadius, c.TopRadius, c.Height, c.QualityX, c.QualityY, false); break;
-            case DiskElement d: g.PartialDisk(r, d.InnerRadius, d.OuterRadius, d.QualityX, d.QualityY, 0, d.SweepAngle, false); break;
-            case TorusElement t: g.Torus(r, t.TubeRadius, t.QualityX, t.RingRadius, t.QualityY, false); break;
-            case BoxElement b: g.Box(r, b.SizeX, b.SizeY, b.SizeZ, false); break;
-            case RectangleElement rc: g.Rectangle(r, rc.SizeX, rc.SizeY, false); break;
-            case TriangleElement tr: g.Triangle(r, tr.X1, tr.Y1, tr.X2, tr.Y2, false); break;
-            case MeshElement m: g.BezierPatch(r, m.Points, m.CountX, m.CountY, m.QualityX, m.QualityY, false); break;
-        }
+        g.Shape(r, e, false);
         return (g.Data.ToArray(), r);
     }
 
@@ -548,17 +538,7 @@ internal sealed class BlenderExporter
             if (Vector3.Dot(face, N(a) + N(b) + N(c)) < 0) (b, c) = (c, b);
             tris.Add((a, b, c));
         }
-        foreach (var r in ranges)
-        {
-            if (r.Mode == PrimitiveType.TriangleStrip)
-                for (int i = 0; i + 2 < r.Count; i++)
-                {
-                    int v = r.First + i;
-                    if (i % 2 == 0) Tri(v, v + 1, v + 2); else Tri(v + 1, v, v + 2);
-                }
-            else if (r.Mode == PrimitiveType.Triangles)
-                for (int i = 0; i + 2 < r.Count; i += 3) Tri(r.First + i, r.First + i + 1, r.First + i + 2);
-        }
+        GeometryBuilder.Triangles(ranges, Tri);
 
         long verts = bin.BaseStream.Position;
         foreach (int i in positions) { bin.Write(data[i * F]); bin.Write(data[i * F + 1]); bin.Write(data[i * F + 2]); }

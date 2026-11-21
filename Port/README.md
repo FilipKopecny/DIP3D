@@ -1,4 +1,4 @@
-# Overbryce Animator 2.1
+# Overbryce Animator 2.2
 
 This is a key-frame 3D animation editor for current Windows, built on .NET 10 and OpenGL 3.3. It is a port of **Overbryce Animator 1.0**, written in 1998 by Tomáš Kopečný for the diploma thesis *Simulácia virtuálnej reality pomocou OpenGL – animácia scény*. The thesis was submitted at FEI STU Bratislava; the original program was built with Borland C++ Builder 3 and OpenGL 1.1.
 
@@ -38,6 +38,22 @@ Elements get four new properties for it: *Reflectivity*, *Refractive index*, *Gl
 |---|---|
 | ![Lumina at 46 s, classic](docs/images/lumina-46-classic.png) | ![Lumina at 46 s, modern](docs/images/lumina-46-modern.png) |
 
+### New in 2.2: ray tracing
+
+An offline CPU ray tracer renders exported frames, snapshots and a preview window (View › Ray trace this view, F9). Compared with the modern renderer it adds:
+
+- exact reflections, also glossy ones;
+- glass that refracts and absorbs light;
+- soft shadows from lights of a given size;
+- depth of field and motion blur;
+- smooth spheres, cones, disks and tori.
+
+With its effects off, it renders the classic look within about one level in 255 on average. Elements get *Roughness* and *Absorption*, lights a *Light radius*, and cameras an *Aperture* and *Focus*. They are stored like the 2.1 additions, so older versions still open the files. See [Ray tracing](docs/raytracing.md).
+
+| Modern | Ray traced |
+|---|---|
+| ![Lumina at 54 s, modern](docs/images/lumina-54-modern.png) | ![Lumina at 54 s, ray traced](docs/images/lumina-54-raytraced.png) |
+
 ## Features
 
 - **Elements:**
@@ -61,10 +77,11 @@ Elements get four new properties for it: *Reflectivity*, *Refractive index*, *Gl
 - **Rendering:**
   - Classic: the OpenGL 1.1 look of 1998, emulated with shaders.
   - Modern: HDR, bloom, shadow maps, ambient occlusion, reflection probes, glass and glow.
+  - Ray traced (offline, on all CPU cores): reflections, refraction, soft shadows, depth of field and motion blur.
 - **Output:**
-  - Off-screen frame export at up to 1920×1080 with multisampling.
+  - Off-screen frame export at up to 1920×1080 with multisampling, or ray traced.
   - Command-line rendering of a single picture or of every frame.
-- **Compatibility:** reads and writes the original `.ani` format, so files open in both programs. The 2.1 additions go after the end of the original format, where older versions stop reading.
+- **Compatibility:** reads and writes the original `.ani` format, so files open in both programs. The 2.1 and 2.2 additions go after the end of the original format, where older versions stop reading.
 
 ## Requirements
 
@@ -87,7 +104,7 @@ dotnet run --project src\Overbryce.App -- "..\DIP\SCENES\NewAni.ani"
 ```
 
 ```powershell
-dotnet test tests\Overbryce.Core.Tests
+dotnet test Overbryce.sln
 ```
 
 The sample animations and textures in `..\DIP\SCENES` and in `samples` are copied to `Scenes\` next to `Overbryce.exe`. *File › Open* starts in that folder. The tests also read the samples from `DIP\SCENES`, so keep the `Port` folder next to `DIP`.
@@ -111,12 +128,14 @@ To share it, zip that folder. Before you publish again, close any copy of `Overb
 ### Command line
 
 ```text
-Overbryce.exe [file.ani] [--snapshot out.png] [--time seconds] [--view camera|front|side|top] [--wire] [--size WxH] [--modern|--classic]
-Overbryce.exe file.ani --frames folder [--from seconds] [--to seconds] [--view ...] [--wire] [--size WxH] [--modern|--classic]
+Overbryce.exe [file.ani] [--snapshot out.png] [--time seconds] [--view camera|front|side|top] [--wire] [--size WxH] [--modern|--classic] [--raytrace [--samples N] [--bounces N]]
+Overbryce.exe file.ani --frames folder [--from seconds] [--to seconds] [--view ...] [--wire] [--size WxH] [--modern|--classic] [--raytrace [--samples N] [--bounces N]]
 Overbryce.exe file.ani --blender folder [--no-blend]
 ```
 
 `--modern` and `--classic` choose the renderer. Without either, the animation's own setting (*Open in modern mode*) decides.
+
+`--raytrace` renders through the ray tracer instead of OpenGL. `--samples` and `--bounces` override the animation's ray tracing settings. With `--classic`, the tracer renders the classic look.
 
 With `--snapshot`, Overbryce renders one picture and exits without opening the editor:
 
@@ -128,6 +147,12 @@ With `--frames`, it renders every frame (or those between `--from` and `--to`) a
 
 ```powershell
 Overbryce.exe Scenes\Lumina\Lumina.ani --frames frames --size 1280x720
+```
+
+The same picture ray traced with 32 samples per pixel:
+
+```powershell
+Overbryce.exe Scenes\Lumina\Lumina.ani --snapshot lumina.png --time 54 --size 1280x720 --raytrace --samples 32
 ```
 
 With `--blender`, it exports the animation to a Blender scene (`.blend`) and exits. It needs Blender installed, or with `--no-blend` it writes only the data and the script that builds the scene. See [Export to Blender](docs/blender-export.md):
@@ -147,6 +172,7 @@ Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
 | Camera, front, side or top view | Ctrl+1 … Ctrl+4 |
 | Wire frame on/off | Ctrl+W |
 | Classic or modern rendering | Ctrl+M (settings: *Animation › Modern rendering settings*) |
+| Ray trace the view | F9 (settings: *Animation › Ray tracing settings*) |
 | Previous or next key state | PgUp / PgDn (PgDn on the last state adds a copy 5 s later) |
 | First or last key state | Ctrl+Home / Ctrl+End |
 | Duplicate or delete the key state | Ctrl+D / Ctrl+Del |
@@ -166,15 +192,17 @@ More about selection and the other tools:
 - **Tool bars** are the original button bitmaps.
   - The top bar inserts elements.
   - The right bar moves, rotates, grows and shrinks the selected element by a fixed step.
-- **Export** writes `name000000.bmp`, `name000001.bmp`, … and a `list.lst` through the active camera. Set the size, antialiasing and format in *File › Rendering settings*.
+- **Export** writes `name000000.bmp`, `name000001.bmp`, … and a `list.lst` through the active camera. Set the size, antialiasing, format and renderer (as the view, classic, modern or ray traced) in *File › Rendering settings*.
 
 ## Project layout
 
 | Path | Content |
 |---|---|
-| `src/Overbryce.Core` | UI-free model: elements, groups, key states, the animation, interpolation, transforms, and the `.ani` reader and writer |
-| `src/Overbryce.App` | WinForms editor, the OpenGL renderer (a shader that emulates the GL 1.1 fixed-function pipeline, and the modern passes), picking, and frame export |
-| `tests/Overbryce.Core.Tests` | xUnit tests: loading all 7 original sample files and Lumina, save and reload with identical output, the 2.1 extension block, interpolation and camera maths |
+| `src/Overbryce.Core` | UI-free model: elements, groups, key states, the animation, interpolation, transforms, the `.ani` reader and writer, and the tessellation shared by the renderers |
+| `src/Overbryce.Raytrace` | The offline ray tracer: scene compiler, BVH, shapes, shading, sampling and post-processing; needs only `Overbryce.Core` |
+| `src/Overbryce.App` | WinForms editor, the OpenGL renderer (a shader that emulates the GL 1.1 fixed-function pipeline, and the modern passes), the ray-tracing preview, picking, and frame export |
+| `tests/Overbryce.Core.Tests` | xUnit tests: loading all 7 original sample files and Lumina, save and reload with identical output, the extension block, interpolation and camera maths |
+| `tests/Overbryce.Raytrace.Tests` | xUnit tests: shape intersections, the BVH, the classic lighting, shadows, glass, textures, motion blur and depth of field |
 | `samples/Lumina` | The Lumina animation and its textures |
 | `tools/Lumina` | The generator that writes `samples/Lumina` through `Overbryce.Core` |
 | `docs/` | Documentation |
@@ -193,7 +221,7 @@ The model classes follow the original ones:
 - [docs/animation-model.md](docs/animation-model.md): how frames are computed, covering key states, element matching, the spline, stopping, permanent motion and the transform hierarchy.
 - [docs/ani-format.md](docs/ani-format.md): the `.ani` file format, including the 2.1 extension block.
 - [docs/modern-rendering.md](docs/modern-rendering.md): the modern renderer, its settings and the new element properties.
-- [docs/raytracing-plan.md](docs/raytracing-plan.md): the plan for an offline ray tracer (not implemented yet).
+- [docs/raytracing.md](docs/raytracing.md): the ray tracer, its settings, the new element properties, and how it compares with the OpenGL renderers.
 - [docs/blender-export.md](docs/blender-export.md): exporting an animation to Blender.
 - [docs/changes-from-1998.md](docs/changes-from-1998.md): bugs fixed in the port, behaviour that differs from the original, and what was kept on purpose.
 - [docs/port-overview.md](docs/port-overview.md): how the port was made, in brief.

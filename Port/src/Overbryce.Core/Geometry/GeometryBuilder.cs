@@ -1,17 +1,28 @@
-using OpenTK.Graphics.OpenGL4;
+using Overbryce.Core.Model;
 
-namespace Overbryce.App.Rendering;
+namespace Overbryce.Core.Geometry;
 
-/// <summary>One draw call inside the per-frame vertex stream.</summary>
-internal readonly record struct DrawRange(PrimitiveType Mode, int First, int Count);
+/// <summary>How the vertices of a <see cref="DrawRange"/> are joined (the OpenGL primitive types the builder uses).</summary>
+public enum PrimitiveMode
+{
+    Triangles,
+    TriangleStrip,
+    Lines,
+    LineStrip,
+    LineLoop,
+}
+
+/// <summary>One draw call inside the vertex stream.</summary>
+public readonly record struct DrawRange(PrimitiveMode Mode, int First, int Count);
 
 /// <summary>
 /// CPU tessellation of the original primitives. The OpenGL 1.1 original used GLU quadrics,
 /// glBegin/glEnd and evaluators; these builders produce the same vertices (positions, normals and
 /// texture coordinates follow the Mesa GLU / evaluator conventions) into an interleaved stream
-/// <c>pos.xyz, normal.xyz, uv.st</c> that is drawn with a core-profile shader.
+/// <c>pos.xyz, normal.xyz, uv.st</c>. The OpenGL renderers draw it with a core-profile shader and the
+/// ray tracer intersects the same triangles, so both see exactly the same facets.
 /// </summary>
-internal sealed class GeometryBuilder
+public sealed class GeometryBuilder
 {
     public const int FloatsPerVertex = 8;
 
@@ -35,9 +46,66 @@ internal sealed class GeometryBuilder
         _floats += FloatsPerVertex;
     }
 
+    /// <summary>The geometry of a shape element as the original drew it (nothing for lights, cameras and groups).</summary>
+    public void Shape(List<DrawRange> o, Element e, bool lines)
+    {
+        switch (e)
+        {
+            case SphereElement s:
+                Sphere(o, s.Radius, s.QualityX, s.QualityY, lines);
+                break;
+            case ConeElement c:
+                Cylinder(o, c.BaseRadius, c.TopRadius, c.Height, c.QualityX, c.QualityY, lines);
+                break;
+            case DiskElement d:
+                // CDisk passed polomer1 as the inner and polomer2 as the outer radius to gluPartialDisk
+                PartialDisk(o, d.InnerRadius, d.OuterRadius, d.QualityX, d.QualityY, 0, d.SweepAngle, lines);
+                break;
+            case TorusElement t:
+                Torus(o, t.TubeRadius, t.QualityX, t.RingRadius, t.QualityY, lines);
+                break;
+            case BoxElement b:
+                Box(o, b.SizeX, b.SizeY, b.SizeZ, lines);
+                break;
+            case RectangleElement r:
+                Rectangle(o, r.SizeX, r.SizeY, lines);
+                break;
+            case TriangleElement tr:
+                Triangle(o, tr.X1, tr.Y1, tr.X2, tr.Y2, lines);
+                break;
+            case MeshElement m:
+                BezierPatch(o, m.Points, m.CountX, m.CountY, m.QualityX, m.QualityY, lines);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Calls <paramref name="triangle"/> with the vertex indices of every triangle of the filled
+    /// <paramref name="ranges"/>, in the winding OpenGL uses (every second strip triangle reversed).
+    /// </summary>
+    public static void Triangles(IEnumerable<DrawRange> ranges, Action<int, int, int> triangle)
+    {
+        foreach (var r in ranges)
+        {
+            if (r.Mode == PrimitiveMode.TriangleStrip)
+            {
+                for (int i = 0; i + 2 < r.Count; i++)
+                {
+                    int v = r.First + i;
+                    if (i % 2 == 0) triangle(v, v + 1, v + 2);
+                    else triangle(v + 1, v, v + 2);
+                }
+            }
+            else if (r.Mode == PrimitiveMode.Triangles)
+            {
+                for (int i = 0; i + 2 < r.Count; i += 3) triangle(r.First + i, r.First + i + 1, r.First + i + 2);
+            }
+        }
+    }
+
     private void Begin(out int first) => first = VertexCount;
 
-    private void End(List<DrawRange> output, PrimitiveType mode, int first)
+    private void End(List<DrawRange> output, PrimitiveMode mode, int first)
     {
         int count = VertexCount - first;
         if (count > 0) output.Add(new DrawRange(mode, first, count));
@@ -73,7 +141,7 @@ internal sealed class GeometryBuilder
                     P(rho + drho, theta, s, t - dt);
                     s += ds;
                 }
-                End(o, PrimitiveType.TriangleStrip, first);
+                End(o, PrimitiveMode.TriangleStrip, first);
                 t -= dt;
             }
             return;
@@ -84,13 +152,13 @@ internal sealed class GeometryBuilder
         {
             Begin(out int first);
             for (int j = 0; j < slices; j++) P(i * drho, j * dtheta, 0, 0);
-            End(o, PrimitiveType.LineLoop, first);
+            End(o, PrimitiveMode.LineLoop, first);
         }
         for (int j = 0; j < slices; j++)
         {
             Begin(out int first);
             for (int i = 0; i <= stacks; i++) P(i * drho, j * dtheta, 0, 0);
-            End(o, PrimitiveType.LineStrip, first);
+            End(o, PrimitiveMode.LineStrip, first);
         }
     }
 
@@ -124,7 +192,7 @@ internal sealed class GeometryBuilder
                     P(i, j, s, (double)j / stacks);
                     P(i, j + 1, s, (double)(j + 1) / stacks);
                 }
-                End(o, PrimitiveType.TriangleStrip, first);
+                End(o, PrimitiveMode.TriangleStrip, first);
             }
             return;
         }
@@ -133,7 +201,7 @@ internal sealed class GeometryBuilder
         {
             Begin(out int first);
             for (int i = 0; i < slices; i++) P(i, j, 0, 0);
-            End(o, PrimitiveType.LineLoop, first);
+            End(o, PrimitiveMode.LineLoop, first);
         }
         Begin(out int f2);
         for (int i = 0; i < slices; i++)
@@ -141,7 +209,7 @@ internal sealed class GeometryBuilder
             P(i, 0, 0, 0);
             P(i, stacks, 0, 0);
         }
-        End(o, PrimitiveType.Lines, f2);
+        End(o, PrimitiveMode.Lines, f2);
     }
 
     // ---------------------------------------------------------------------------------- disk
@@ -175,7 +243,7 @@ internal sealed class GeometryBuilder
                     P(r2, a);
                     P(r1, a);
                 }
-                End(o, PrimitiveType.TriangleStrip, first);
+                End(o, PrimitiveMode.TriangleStrip, first);
             }
             return;
         }
@@ -188,7 +256,7 @@ internal sealed class GeometryBuilder
             Begin(out int first);
             int n = closed ? slices : slices + 1;
             for (int s = 0; s < n; s++) P(r, start + s * da);
-            End(o, closed ? PrimitiveType.LineLoop : PrimitiveType.LineStrip, first);
+            End(o, closed ? PrimitiveMode.LineLoop : PrimitiveMode.LineStrip, first);
         }
         Begin(out int f2);
         int spokes = closed ? slices : slices + 1;
@@ -198,7 +266,7 @@ internal sealed class GeometryBuilder
             P(inner, a);
             P(outer, a);
         }
-        End(o, PrimitiveType.Lines, f2);
+        End(o, PrimitiveMode.Lines, f2);
     }
 
     // ---------------------------------------------------------------------------------- torus
@@ -223,7 +291,7 @@ internal sealed class GeometryBuilder
                     V((rt + rc * cs) * ct, (rt + rc * cs) * st, rc * ss, ct * cs, st * cs, ss, 0, 0);
                 }
             }
-            End(o, lines ? PrimitiveType.LineLoop : PrimitiveType.TriangleStrip, first);
+            End(o, lines ? PrimitiveMode.LineLoop : PrimitiveMode.TriangleStrip, first);
         }
     }
 
@@ -274,12 +342,12 @@ internal sealed class GeometryBuilder
             if (lines)
             {
                 for (int c = 0; c < 4; c++) C(f, c);
-                End(o, PrimitiveType.LineLoop, first);
+                End(o, PrimitiveMode.LineLoop, first);
             }
             else
             {
                 C(f, 0); C(f, 1); C(f, 3); C(f, 2); // quad as a strip
-                End(o, PrimitiveType.TriangleStrip, first);
+                End(o, PrimitiveMode.TriangleStrip, first);
             }
         }
     }
@@ -296,7 +364,7 @@ internal sealed class GeometryBuilder
             V(px, -py, 0, 0, 0, 1, 1, 0);
             V(px, py, 0, 0, 0, 1, 1, 1);
             V(-px, py, 0, 0, 0, 1, 0, 1);
-            End(o, PrimitiveType.LineLoop, first);
+            End(o, PrimitiveMode.LineLoop, first);
         }
         else
         {
@@ -304,7 +372,7 @@ internal sealed class GeometryBuilder
             V(px, -py, 0, 0, 0, 1, 1, 0);
             V(-px, py, 0, 0, 0, 1, 0, 1);
             V(px, py, 0, 0, 0, 1, 1, 1);
-            End(o, PrimitiveType.TriangleStrip, first);
+            End(o, PrimitiveMode.TriangleStrip, first);
         }
     }
 
@@ -314,7 +382,7 @@ internal sealed class GeometryBuilder
         V(0, 0, 0, 0, 0, 1, 0, 0);
         V(x1, y1, 0, 0, 0, 1, 0, 1);
         V(x2, y2, 0, 0, 0, 1, 1, 0);
-        End(o, lines ? PrimitiveType.LineLoop : PrimitiveType.Triangles, first);
+        End(o, lines ? PrimitiveMode.LineLoop : PrimitiveMode.Triangles, first);
     }
 
     // ---------------------------------------------------------------------------------- bezier mesh
@@ -365,7 +433,7 @@ internal sealed class GeometryBuilder
                     Eval(u, v0);
                     Eval(u, v1);
                 }
-                End(o, PrimitiveType.TriangleStrip, first);
+                End(o, PrimitiveMode.TriangleStrip, first);
             }
             return;
         }
@@ -374,13 +442,13 @@ internal sealed class GeometryBuilder
         {
             Begin(out int first);
             for (int i = 0; i <= gridU; i++) Eval((double)i / gridU, (double)j / gridV);
-            End(o, PrimitiveType.LineStrip, first);
+            End(o, PrimitiveMode.LineStrip, first);
         }
         for (int i = 0; i <= gridU; i++)
         {
             Begin(out int first);
             for (int j = 0; j <= gridV; j++) Eval((double)i / gridU, (double)j / gridV);
-            End(o, PrimitiveType.LineStrip, first);
+            End(o, PrimitiveMode.LineStrip, first);
         }
     }
 

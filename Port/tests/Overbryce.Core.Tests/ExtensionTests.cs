@@ -107,33 +107,82 @@ public class ExtensionTests
         string text = AniFile.Serialize(Sample()) +
             "\r\nOverbryce2 7\r\n" +
             "Modern enabled=1 futureSetting=abc ;\r\n" +
-            "Element 0 1.0 reflectivity=0.5 roughness=0.2 ;\r\n" +
+            "Element 0 1.0 reflectivity=0.5 sheen=0.2 ;\r\n" +
             "Raytracer samples=64 bounces=4 ;\r\n" +
             "EndOverbryce2\r\n";
         var a = AniFile.Parse(text);
         Assert.True(a.Modern.Enabled);
         Assert.Equal("abc", a.Modern.Unknown["futureSetting"]);
         Assert.Equal(0.5f, Chrome(a.Scenes[0]).Reflectivity);
-        Assert.Equal("0.2", Chrome(a.Scenes[0]).ExtensionData!["roughness"]);
+        Assert.Equal("0.2", Chrome(a.Scenes[0]).ExtensionData!["sheen"]);
         Assert.Equal("Raytracer samples=64 bounces=4", Assert.Single(a.UnknownExtensions));
 
         string again = AniFile.Serialize(a);
         Assert.Contains("futureSetting=abc", again);
-        Assert.Contains("roughness=0.2", again);
+        Assert.Contains("sheen=0.2", again);
         Assert.Contains("Raytracer samples=64 bounces=4 ;", again);
         var b = AniFile.Parse(again);
-        Assert.Equal("0.2", Chrome(b.Scenes[0]).ExtensionData!["roughness"]);
+        Assert.Equal("0.2", Chrome(b.Scenes[0]).ExtensionData!["sheen"]);
         Assert.Equal(again, AniFile.Serialize(b));
+    }
+
+    [Fact]
+    public void Ray_tracing_settings_and_values_round_trip()
+    {
+        var a = Sample();
+        a.Scenes.Add(new Scene { AniTime = 4 });
+        var cam = new CameraElement("Cam") { Active = true, Aperture = 0.2f, Focus = 7.5f };
+        a.Scenes[2].Add(cam);
+        a.Raytrace.Samples = 64;
+        a.Raytrace.Geometry = RaytraceGeometry.Smooth;
+        a.Raytrace.AmbientOcclusion = true;
+        a.Raytrace.Shutter = 0.5f;
+        foreach (var s in a.Scenes.Take(2))
+        {
+            ((LightElement)s.FindChild("Lamp")!).LightRadius = 0.4f;
+            Chrome(s).Roughness = 0.3f;
+            Glass(s).Absorption = 2f;
+        }
+
+        string text = AniFile.Serialize(a);
+        Assert.Contains("Raytrace samples=64 geometry=smooth ao=1 shutter=0.5 ;", text);
+        var b = AniFile.Parse(text);
+        Assert.Equal(64, b.Raytrace.Samples);
+        Assert.Equal(RaytraceGeometry.Smooth, b.Raytrace.Geometry);
+        Assert.True(b.Raytrace.AmbientOcclusion);
+        Assert.Equal(0.5f, b.Raytrace.Shutter);
+        Assert.Equal(6, b.Raytrace.Bounces); // untouched values keep their defaults
+        Assert.Equal(0.4f, ((LightElement)b.Scenes[0].FindChild("Lamp")!).LightRadius);
+        Assert.Equal(0.3f, Chrome(b.Scenes[1]).Roughness);
+        Assert.Equal(2f, Glass(b.Scenes[0]).Absorption);
+        var cam2 = (CameraElement)b.Scenes[2].FindChild("Cam")!;
+        Assert.Equal(0.2f, cam2.Aperture);
+        Assert.Equal(7.5f, cam2.Focus);
+        Assert.Equal(text, AniFile.Serialize(b));
+
+        // keys of another element type are kept, not applied
+        var odd = AniFile.Parse(AniFile.Serialize(Sample()) + "\r\nOverbryce2 1\r\nElement 0 1.0 lightRadius=3 aperture=1 ;\r\nEndOverbryce2\r\n");
+        Assert.Equal("3", Chrome(odd.Scenes[0]).ExtensionData!["lightRadius"]);
+        Assert.Contains("lightRadius=3", AniFile.Serialize(odd));
+    }
+
+    [Fact]
+    public void Default_ray_tracing_values_add_nothing_to_the_file()
+    {
+        var a = Sample();
+        a.Scenes[0].Add(new CameraElement("Cam"));
+        string text = AniFile.Serialize(a);
+        Assert.DoesNotContain(AniExtensions.Begin, text);
     }
 
     [Fact]
     public void Extension_data_follows_the_element_when_cloned()
     {
-        var e = new SphereElement("S") { Reflectivity = 0.3f, ExtensionData = new() { ["roughness"] = "0.1" } };
+        var e = new SphereElement("S") { Reflectivity = 0.3f, ExtensionData = new() { ["sheen"] = "0.1" } };
         var copy = e.Clone();
         Assert.Equal(0.3f, copy.Reflectivity);
-        copy.ExtensionData!["roughness"] = "0.9";
-        Assert.Equal("0.1", e.ExtensionData["roughness"]);
+        copy.ExtensionData!["sheen"] = "0.9";
+        Assert.Equal("0.1", e.ExtensionData["sheen"]);
     }
 
     [Theory]
@@ -197,5 +246,32 @@ public class ExtensionTests
         Assert.InRange(Glass(mid).RefractiveIndex, 1.01f, 1.99f);
         Assert.InRange(Chrome(mid).Glow, 1.01f, 2.99f);
         Assert.Equal(1f, Chrome(a.Evaluate(2)!).Reflectivity, 4);
+    }
+
+    [Fact]
+    public void Default_surface_values_stay_exact_between_key_states()
+    {
+        // uneven spacing: the spline weights then do not add up to exactly 1 in floating point
+        var a = new Animation("Uneven") { Fps = 25 };
+        foreach (float t in new[] { 0f, 0.7f, 2.3f, 5.1f, 9.37f })
+        {
+            var s = new Scene { AniTime = t };
+            s.Add(new SphereElement("Halo") { Diffuse = new Rgba(1, 0.9f, 0.5f, 0.3f) });
+            s.Add(new LightElement("Sun"));
+            s.Add(new CameraElement("Eye"));
+            a.Scenes.Add(s);
+        }
+        for (float t = 0; t <= 9.37f; t += 0.0137f)
+        {
+            var scene = a.Evaluate(t)!;
+            var halo = scene.FindChild("Halo")!;
+            Assert.Equal(1f, halo.RefractiveIndex);
+            Assert.Equal(0f, halo.Reflectivity);
+            Assert.Equal(1f, halo.Glow);
+            Assert.False(halo.IsGlass);
+            Assert.False(halo.IsReflective);
+            Assert.Equal(0f, ((LightElement)scene.FindChild("Sun")!).LightRadius);
+            Assert.Equal(0f, ((CameraElement)scene.FindChild("Eye")!).Aperture);
+        }
     }
 }

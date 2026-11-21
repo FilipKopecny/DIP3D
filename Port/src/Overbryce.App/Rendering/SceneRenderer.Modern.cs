@@ -120,15 +120,14 @@ internal sealed partial class SceneRenderer
     }
 
     /// <summary>
-    /// Values this close to "off" count as off. Interpolating between key states that all hold the
-    /// default gives e.g. a refractive index of 1.0000001, which must not turn a translucent element
-    /// (a sun's halo, a lamp's beam) into glass.
+    /// Values this close to "off" count as off (shared with the ray tracer through
+    /// <see cref="Element.IsReflective"/> and <see cref="Element.IsGlass"/>). Interpolating between key
+    /// states that all hold the default gives e.g. a refractive index of 1.0000001, which must not turn
+    /// a translucent element (a sun's halo, a lamp's beam) into glass.
     /// </summary>
-    private const float Negligible = 1e-3f;
+    private static bool IsReflective(Element m) => m.IsReflective;
 
-    private static bool IsReflective(Element m) => m.Reflectivity > Negligible;
-
-    private static bool IsGlass(Element m) => m.RefractiveIndex > 1f + Negligible && m.Diffuse.A < 0.999f;
+    private static bool IsGlass(Element m) => m.IsGlass;
 
     private void SetModernMaterial(DrawCommand cmd, bool ao, bool env)
     {
@@ -280,7 +279,7 @@ internal sealed partial class SceneRenderer
             GL.BindTexture(TextureTarget.Texture2D, cmd.Texture);
         }
         foreach (var r in cmd.Ranges)
-            GL.DrawArrays(r.Mode, r.First, r.Count);
+            GL.DrawArrays(ToGl(r.Mode), r.First, r.Count);
     }
 
     // ==================================================================================== reflections

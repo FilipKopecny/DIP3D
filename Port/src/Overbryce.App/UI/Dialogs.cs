@@ -6,7 +6,18 @@ namespace Overbryce.App.UI;
 /// (<see cref="Output"/> is a folder).
 /// </summary>
 internal sealed record SnapshotRequest(string Output, float? Time, Rendering.ViewMode View, bool Wireframe, Size Size,
-    bool Frames = false, float? From = null, float? To = null, bool? Modern = null);
+    bool Frames = false, float? From = null, float? To = null, bool? Modern = null,
+    bool Raytrace = false, int? Samples = null, int? Bounces = null, Action<string>? Log = null);
+
+/// <summary>Which renderer draws the exported frames.</summary>
+internal enum ExportRenderer
+{
+    /// <summary>The classic or the modern renderer, whichever the view shows.</summary>
+    AsView,
+    Classic,
+    Modern,
+    RayTraced,
+}
 
 /// <summary>Settings of the original "Gen. settings" dialog (TGenSettings).</summary>
 internal sealed class RenderSettings
@@ -17,6 +28,7 @@ internal sealed class RenderSettings
     public bool Antialias { get; set; } = true;
     public bool AlphaBlend { get; set; } = true;
     public bool ExportPng { get; set; }
+    public ExportRenderer Renderer { get; set; } = ExportRenderer.AsView;
 }
 
 internal static class DialogLayout
@@ -54,7 +66,7 @@ internal static class SettingsDialog
 {
     public static bool Show(IWin32Window owner, RenderSettings settings)
     {
-        using var form = DialogLayout.CreateDialog("Rendering settings", 340, 220);
+        using var form = DialogLayout.CreateDialog("Rendering settings", 380, 250);
         var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -67,14 +79,19 @@ internal static class SettingsDialog
         var antialias = new CheckBox { Text = "Antialiasing (multisampling)", Checked = settings.Antialias, AutoSize = true };
         var alpha = new CheckBox { Text = "Alpha blending (white texels transparent)", Checked = settings.AlphaBlend, AutoSize = true };
         var png = new CheckBox { Text = "Export PNG instead of BMP", Checked = settings.ExportPng, AutoSize = true };
+        var renderer = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+        renderer.Items.AddRange(["As the view (classic or modern)", "Classic", "Modern", "Ray traced"]);
+        renderer.SelectedIndex = (int)settings.Renderer;
 
         table.Controls.Add(new Label { Text = "Export resolution:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
         table.Controls.Add(resolution, 1, 0);
-        table.Controls.Add(antialias, 0, 1);
+        table.Controls.Add(new Label { Text = "Export renderer:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
+        table.Controls.Add(renderer, 1, 1);
+        table.Controls.Add(antialias, 0, 2);
         table.SetColumnSpan(antialias, 2);
-        table.Controls.Add(alpha, 0, 2);
+        table.Controls.Add(alpha, 0, 3);
         table.SetColumnSpan(alpha, 2);
-        table.Controls.Add(png, 0, 3);
+        table.Controls.Add(png, 0, 4);
         table.SetColumnSpan(png, 2);
 
         form.Controls.Add(table);
@@ -85,7 +102,49 @@ internal static class SettingsDialog
         settings.Antialias = antialias.Checked;
         settings.AlphaBlend = alpha.Checked;
         settings.ExportPng = png.Checked;
+        settings.Renderer = (ExportRenderer)Math.Max(0, renderer.SelectedIndex);
         return true;
+    }
+}
+
+/// <summary>The ray tracer's settings of the animation (new in 2.2). Cancel restores the previous values.</summary>
+internal static class RaytraceSettingsDialog
+{
+    public static bool Show(IWin32Window owner, Core.Model.RaytraceSettings settings)
+    {
+        var original = settings.Clone();
+        using var form = DialogLayout.CreateDialog("Ray tracing settings", 440, 470);
+        var grid = new PropertyGrid
+        {
+            Dock = DockStyle.Fill,
+            SelectedObject = settings,
+            ToolbarVisible = false,
+            HelpVisible = true,
+            PropertySort = PropertySort.Categorized,
+        };
+        grid.PropertyValueChanged += (_, _) =>
+        {
+            settings.Normalize();
+            grid.Refresh();
+        };
+        var note = new Label
+        {
+            Dock = DockStyle.Top,
+            AutoSize = false,
+            Height = 48,
+            Text = "Exposure and bloom come from the modern rendering settings. Per element: reflectivity, refractive index, " +
+                   "roughness, absorption; per light: radius; per camera: aperture and focus distance. F9 traces the view.",
+        };
+        form.Controls.Add(grid);
+        form.Controls.Add(note);
+        form.Controls.Add(DialogLayout.Buttons(form));
+        if (form.ShowDialog(owner) == DialogResult.OK)
+        {
+            settings.Normalize();
+            return true;
+        }
+        settings.CopyFrom(original);
+        return false;
     }
 }
 
@@ -160,7 +219,7 @@ internal static class AboutDialog
                 "Overbryce Animator v1.0\r\n" +
                 "Tomáš Kopečný, FEI STU Bratislava, 1998\r\n" +
                 "Diploma thesis: key-frame animation with OpenGL\r\n\r\n" +
-                "Port v2.1 for Windows / .NET 10 / OpenGL 3.3 core.\r\n" +
+                "Port v2.2 for Windows / .NET 10 / OpenGL 3.3 core.\r\n" +
                 "The animation model, the .ani file format and the Catmull-Rom\r\n" +
                 "key-frame interpolation are carried over from the original\r\n" +
                 "Borland C++ Builder application; the fixed-function OpenGL 1.1\r\n" +

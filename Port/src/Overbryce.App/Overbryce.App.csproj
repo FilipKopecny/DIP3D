@@ -10,13 +10,14 @@
     <RootNamespace>Overbryce.App</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Product>Overbryce Animator</Product>
-    <Version>2.1.0</Version>
+    <Version>2.2.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon></ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Overbryce.Core\Overbryce.Core.csproj" />
+    <ProjectReference Include="..\Overbryce.Raytrace\Overbryce.Raytrace.csproj" />
   </ItemGroup>
 
   <ItemGroup>

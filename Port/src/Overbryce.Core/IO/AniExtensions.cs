@@ -5,13 +5,14 @@ using Overbryce.Core.Model;
 namespace Overbryce.Core.IO;
 
 /// <summary>
-/// The extension block of Overbryce 2.1, written after <c>KoniecAnimacie</c>. The 1998 program and
+/// The extension block of Overbryce 2.1 and later, written after <c>KoniecAnimacie</c>. The 1998 program and
 /// Overbryce 2.0 stop reading at that tag, so they open such files unchanged and simply do not see
 /// the block (backward compatible files). The block is a list of records, each ended by <c>;</c>,
 /// whose values are <c>key=value</c> tokens:
 /// <code>
 /// Overbryce2 1
 /// Modern enabled=1 bloomStrength=0.6 ;
+/// Raytrace samples=64 ;
 /// Element 2 0.3.1 reflectivity=0.8 ior=1.5 ;
 /// EndOverbryce2
 /// </code>
@@ -27,6 +28,7 @@ public static class AniExtensions
     private const string RecordEnd = ";";
     private const string ModernRecord = "Modern";
     private const string ElementRecord = "Element";
+    private const string RaytraceRecord = "Raytrace";
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
@@ -62,13 +64,51 @@ public static class AniExtensions
         IntKey<ModernSettings>("probeSize", s => s.ProbeSize, (s, v) => s.ProbeSize = v, 256),
     ];
 
+    private static readonly Key<RaytraceSettings>[] RaytraceKeys =
+    [
+        IntKey<RaytraceSettings>("samples", s => s.Samples, (s, v) => s.Samples = v, 16),
+        IntKey<RaytraceSettings>("bounces", s => s.Bounces, (s, v) => s.Bounces = v, 6),
+        new("geometry", s => s.Geometry == RaytraceGeometry.Smooth ? "smooth" : "faceted",
+            (s, v) => { if (v is "smooth" or "faceted") s.Geometry = v == "smooth" ? RaytraceGeometry.Smooth : RaytraceGeometry.Faceted; },
+            s => s.Geometry == RaytraceGeometry.Faceted),
+        BoolKey<RaytraceSettings>("shadows", s => s.Shadows, (s, v) => s.Shadows = v, true),
+        BoolKey<RaytraceSettings>("ao", s => s.AmbientOcclusion, (s, v) => s.AmbientOcclusion = v, false),
+        IntKey<RaytraceSettings>("aoRays", s => s.AoRays, (s, v) => s.AoRays = v, 4),
+        FloatKey<RaytraceSettings>("aoDistance", s => s.AoDistance, (s, v) => s.AoDistance = v, 0.5f),
+        FloatKey<RaytraceSettings>("shutter", s => s.Shutter, (s, v) => s.Shutter = v, 0f),
+        IntKey<RaytraceSettings>("blurSteps", s => s.BlurSteps, (s, v) => s.BlurSteps = v, 3),
+    ];
+
     private static readonly Key<Element>[] ElementKeys =
     [
         FloatKey<Element>("reflectivity", e => e.Reflectivity, (e, v) => e.Reflectivity = Math.Clamp(v, 0f, 1f), 0f),
         FloatKey<Element>("ior", e => e.RefractiveIndex, (e, v) => e.RefractiveIndex = Math.Max(1f, v), 1f),
         FloatKey<Element>("glow", e => e.Glow, (e, v) => e.Glow = Math.Max(0f, v), 1f),
         BoolKey<Element>("shadows", e => e.CastsShadows, (e, v) => e.CastsShadows = v, true),
+        FloatKey<Element>("roughness", e => e.Roughness, (e, v) => e.Roughness = Math.Clamp(v, 0f, 1f), 0f),
+        FloatKey<Element>("absorption", e => e.Absorption, (e, v) => e.Absorption = Math.Max(0f, v), 0f),
     ];
+
+    private static readonly Key<Element>[] LightKeys =
+    [
+        .. ElementKeys,
+        FloatKey<Element>("lightRadius", e => ((LightElement)e).LightRadius, (e, v) => ((LightElement)e).LightRadius = Math.Max(0f, v), 0f),
+    ];
+
+    private static readonly Key<Element>[] CameraKeys =
+    [
+        .. ElementKeys,
+        FloatKey<Element>("aperture", e => ((CameraElement)e).Aperture, (e, v) => ((CameraElement)e).Aperture = Math.Max(0f, v), 0f),
+        FloatKey<Element>("focus", e => ((CameraElement)e).Focus, (e, v) => ((CameraElement)e).Focus = Math.Max(0.01f, v), CameraElement.DefaultFocus),
+    ];
+
+    /// <summary>The keys of an element; a key that does not belong to its type is kept as unknown.</summary>
+    private static Key<Element>[] KeysOf(Element e) => e switch
+    {
+        LightElement => LightKeys,
+        CameraElement => CameraKeys,
+        _ => ElementKeys,
+    };
 
     // ------------------------------------------------------------------ reading
 
@@ -104,6 +144,7 @@ public static class AniExtensions
             // a damaged block: keep what was read
         }
         animation.Modern.Normalize();
+        animation.Raytrace.Normalize();
     }
 
     private static void ApplyRecord(List<string> record, Animation animation)
@@ -114,12 +155,16 @@ public static class AniExtensions
                 ApplyKeys(record.Skip(1), animation.Modern, ModernKeys, animation.Modern.Unknown);
                 return;
 
+            case RaytraceRecord:
+                ApplyKeys(record.Skip(1), animation.Raytrace, RaytraceKeys, animation.Raytrace.Unknown);
+                return;
+
             case ElementRecord when record.Count >= 3
                                     && int.TryParse(record[1], NumberStyles.Integer, Inv, out int state)
                                     && state >= 0 && state < animation.Scenes.Count
                                     && Find(animation.Scenes[state], record[2]) is { } element:
                 element.ExtensionData ??= new Dictionary<string, string>(StringComparer.Ordinal);
-                ApplyKeys(record.Skip(3), element, ElementKeys, element.ExtensionData);
+                ApplyKeys(record.Skip(3), element, KeysOf(element), element.ExtensionData);
                 if (element.ExtensionData.Count == 0) element.ExtensionData = null;
                 return;
 
@@ -172,6 +217,14 @@ public static class AniExtensions
             modern.Append(' ').Append(name).Append('=').Append(value);
         if (modern.Length > 0) records.Add(ModernRecord + modern);
 
+        var raytrace = new StringBuilder();
+        foreach (var key in RaytraceKeys)
+            if (!key.IsDefault(animation.Raytrace))
+                raytrace.Append(' ').Append(key.Name).Append('=').Append(key.Get(animation.Raytrace));
+        foreach (var (name, value) in animation.Raytrace.Unknown)
+            raytrace.Append(' ').Append(name).Append('=').Append(value);
+        if (raytrace.Length > 0) records.Add(RaytraceRecord + raytrace);
+
         for (int s = 0; s < animation.Scenes.Count; s++)
             WriteElements(animation.Scenes[s], s.ToString(Inv), "", records);
 
@@ -192,7 +245,7 @@ public static class AniExtensions
             var e = group.Children[i];
             string path = prefix + i.ToString(Inv);
             var values = new StringBuilder();
-            foreach (var key in ElementKeys)
+            foreach (var key in KeysOf(e))
                 if (!key.IsDefault(e))
                     values.Append(' ').Append(key.Name).Append('=').Append(key.Get(e));
             if (e.ExtensionData != null)

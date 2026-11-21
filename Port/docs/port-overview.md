@@ -16,11 +16,14 @@ Overbryce Animator 1.0 was written in 1998 with Borland C++ Builder 3 and OpenGL
    - orbit and zoom in the editor views;
    - command-line rendering of one picture (`--snapshot`) or of every frame (`--frames`);
    - [export to Blender](blender-export.md) (`--blender`), with the motion carried over exactly as Bezier curves;
-   - in version 2.1, a [modern renderer](modern-rendering.md) next to the classic one: HDR with bloom, soft shadows, ambient occlusion, reflections, refracting glass and glow. Its settings and four new element properties are stored in an [extension block](ani-format.md#the-overbryce-21-extension-block) after the end of the original format, so the 1998 program and version 2.0 still read the files. An offline ray tracer is [planned](raytracing-plan.md).
-6. **Tests** (`tests/Overbryce.Core.Tests`): 59 xUnit tests.
-   - Every original sample and Lumina load, and survive a save and reload unchanged.
-   - The interpolation, stopping, permanent motion and camera maths behave as documented.
-   - The 2.1 extension block round-trips, keeps what a newer version wrote, ignores damaged data, and leaves the original part of the file readable by older versions.
+   - in version 2.1, a [modern renderer](modern-rendering.md) next to the classic one: HDR with bloom, soft shadows, ambient occlusion, reflections, refracting glass and glow. Its settings and four new element properties are stored in an [extension block](ani-format.md#the-overbryce-21-extension-block) after the end of the original format, so the 1998 program and version 2.0 still read the files;
+   - in version 2.2, an offline CPU [ray tracer](raytracing.md) (`src/Overbryce.Raytrace`) for exported frames, snapshots and a preview window. It adds exact reflections, refraction with absorption, soft shadows from sized lights, depth of field and motion blur. With its effects off, it matches the classic renderer. Its settings and the new element properties use the same extension block.
+6. **Tests:** xUnit tests in two projects.
+   - `tests/Overbryce.Core.Tests` (61 tests):
+     - every original sample and Lumina load, and survive a save and reload unchanged;
+     - the interpolation, stopping, permanent motion and camera maths behave as documented;
+     - the extension block round-trips, keeps what a newer version wrote, ignores damaged data, and leaves the original part of the file readable by older versions.
+   - `tests/Overbryce.Raytrace.Tests` (21 tests): the shape intersections, the BVH, the classic lighting, shadows, glass, textures, motion blur and depth of field.
 7. **Evaluation of the thesis**, judged by the standards of its time: [thesis-evaluation.md](thesis-evaluation.md).
 8. **A new sample animation, [Lumina](../samples/Lumina/README.md).** It runs 121 seconds: a 16-second opening in a planetary system, a story on a small moon covered in jungle, a journey to its southern ocean and a dive into an underwater canyon. It is written entirely in Overbryce's own format by a generator, [`tools/Lumina`](../tools/Lumina), through the model library. It shows nested orbits, hierarchical characters up to eleven levels deep, Bezier wings, permanent rotation, camera cuts, first-person shots, fog and a spot light carried by a character. Its textures were painted in code or taken from the 1998 samples. The [contact sheet](images/lumina-contact-sheet.png) shows sixteen stills.
 9. **A distributable build:** a self-contained Windows x64 folder with the samples and Lumina, described under "Distributable build" in [the port's README](../README.md).

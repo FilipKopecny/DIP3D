@@ -120,16 +120,17 @@ KoniecAnimacie
 
 ## The Overbryce 2.1 extension block
 
-Overbryce 2.1 adds values that the 1998 format has no room for: the [modern renderer](modern-rendering.md) settings, and per-element reflectivity, refractive index, glow and "casts shadows". It stores them **after** `KoniecAnimacie`, in a block of its own.
+Overbryce 2.1 adds values that the 1998 format has no room for: the [modern renderer](modern-rendering.md) settings, and per-element reflectivity, refractive index, glow and "casts shadows". It stores them **after** `KoniecAnimacie`, in a block of its own. Overbryce 2.2 adds the [ray tracer](raytracing.md)'s settings and values to the same block: a `Raytrace` record and new `Element` keys.
 
 ```text
 ...
 KoniecAnimacie
 Overbryce2 1
 Modern enabled=1 bloomStrength=0.6 shadowMapSize=2048 ;
-Element 0 2 glow=2.5 shadows=0 ;
-Element 0 3.1 reflectivity=0.35 ;
-Element 4 5.0.2 ior=1.45 ;
+Raytrace samples=64 geometry=smooth ;
+Element 0 2 glow=2.5 shadows=0 lightRadius=0.3 ;
+Element 0 3.1 reflectivity=0.35 roughness=0.2 ;
+Element 4 5.0.2 ior=1.45 absorption=1.5 ;
 EndOverbryce2
 ```
 
@@ -138,11 +139,12 @@ EndOverbryce2
 ```text
 block   := "Overbryce2" version  record*  "EndOverbryce2"
 record  := kind  token*  ";"
-Modern  := "Modern"  key=value*
-Element := "Element"  state  path  key=value*
+Modern   := "Modern"  key=value*
+Raytrace := "Raytrace"  key=value*
+Element  := "Element"  state  path  key=value*
 ```
 
-- `version` is the writer's version, currently `1`. Later versions keep this record syntax, so a reader does not need to check the version.
+- `version` is the writer's version, currently `1` (2.2 did not change it: its additions are new keys and a new record, which 2.1 already keeps). Later versions keep this record syntax, so a reader does not need to check the version.
 - `state` is the 0-based index of the key state.
 - `path` gives the child indices from the key state down to the element, joined by `.`. For example, `3.1` is the second child of the fourth element.
 - Only values that differ from the defaults are written. A file with no modern data has no block at all, so it is written byte for byte as before.
@@ -157,15 +159,27 @@ Element := "Element"  state  path  key=value*
 | | `shadows`, `shadowSoftness`, `shadowLights`, `shadowMapSize` | 0/1, float, int, int | 1, 1, 4, 1024 | shadow maps |
 | | `ao`, `aoRadius`, `aoStrength` | 0/1, float, float | 1, 0.5, 1 | ambient occlusion |
 | | `reflections`, `probes`, `probeSize` | 0/1, int, int | 1, 4, 256 | reflection probes |
+| `Raytrace` (2.2) | `samples` | int 1..4096 | 16 | samples per pixel |
+| | `bounces` | int 0..32 | 6 | reflections and refractions a ray follows |
+| | `geometry` | `faceted`/`smooth` | `faceted` | the OpenGL triangles, or exact round shapes |
+| | `shadows` | 0/1 | 1 | ray-traced shadows |
+| | `ao`, `aoRays`, `aoDistance` | 0/1, int 1..64, float | 0, 4, 0.5 | ray-traced ambient occlusion |
+| | `shutter`, `blurSteps` | float 0..1, int 2..16 | 0, 3 | motion blur: the open part of a frame, and the evaluations within it |
 | `Element` | `reflectivity` | float 0..1 | 0 | mirror-like reflection |
 | | `ior` | float ≥ 1 | 1 | refractive index; above 1 the element is glass |
 | | `glow` | float ≥ 0 | 1 | multiplier of the emission colour |
 | | `shadows` | 0/1 | 1 | the element casts shadows; on a light, the light casts shadows |
+| | `roughness` (2.2) | float 0..1 | 0 | glossy reflection, frosted glass |
+| | `absorption` (2.2) | float ≥ 0 | 0 | absorption in glass per scene unit, tinted by the diffuse colour |
+| `Element` on a light | `lightRadius` (2.2) | float ≥ 0 | 0 | size of the light, for soft shadows |
+| `Element` on a camera | `aperture`, `focus` (2.2) | float ≥ 0, float ≥ 0.01 | 0, 10 | depth of field: lens size and focus distance |
+
+A key that belongs to another element type (`lightRadius` on a sphere, say) is kept and written back, but not applied.
 
 ### Compatibility
 
 - **Backward compatibility.** The 1998 program and Overbryce 2.0 stop reading at `KoniecAnimacie`, so they open a 2.1 file and simply do not see the block. Everything before the block is the original format; a test checks this.
-- **Forward compatibility.** Overbryce 2.1 opens files from later versions:
+- **Forward compatibility.** Overbryce 2.1 opens files from later versions, 2.2 included (it keeps the `Raytrace` record and the new keys without using them):
   - unknown records, and unknown keys in `Modern` and `Element` records, are kept and written back unchanged;
   - values it cannot parse are ignored, so the default stays;
   - out-of-range values are clamped;

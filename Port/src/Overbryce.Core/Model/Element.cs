@@ -102,8 +102,25 @@ public abstract class Element
     [Category("9 Modern rendering"), DisplayName("Glow"), Description("Multiplies the emission colour: above 1 the element shines brighter than white and glows (modern rendering only).")]
     public float Glow { get; set; } = 1f;
 
-    [Category("9 Modern rendering"), DisplayName("Casts shadows"), Description("The element casts shadows (modern rendering only). An element that encloses a light never shadows that light.")]
+    [Category("9 Modern rendering"), DisplayName("Casts shadows"), Description("The element casts shadows (modern rendering and ray tracing). An element that encloses a light never shadows that light.")]
     public bool CastsShadows { get; set; } = true;
+
+    [Category("9 Modern rendering"), DisplayName("Roughness"), Description("0..1: blurs the reflection and the refraction (glossy metal, frosted glass). Ray tracing only.")]
+    public float Roughness { get; set; }
+
+    [Category("9 Modern rendering"), DisplayName("Absorption"), Description("How much a glass element tints the light per scene unit it travels inside, towards its diffuse colour (0 = clear). Ray tracing only.")]
+    public float Absorption { get; set; }
+
+    /// <summary>Surface values closer than this to their defaults count as the defaults.</summary>
+    public const float NegligibleSurface = 1e-3f;
+
+    /// <summary>The element mirrors its surroundings (used by the modern renderer and the ray tracer).</summary>
+    [Browsable(false)]
+    public bool IsReflective => Reflectivity > NegligibleSurface;
+
+    /// <summary>The element refracts like glass: a refractive index above 1 and a see-through diffuse colour.</summary>
+    [Browsable(false)]
+    public bool IsGlass => RefractiveIndex > 1f + NegligibleSurface && Diffuse.A < 0.999f;
 
     /// <summary>Extension values this version does not know (from a newer version); kept and written back unchanged.</summary>
     [Browsable(false)]
@@ -219,6 +236,16 @@ public abstract class Element
         Reflectivity = Math.Clamp(w.Interpolate(prev.Reflectivity, Reflectivity, next.Reflectivity, nn.Reflectivity), 0f, 1f);
         RefractiveIndex = Math.Max(1f, w.Interpolate(prev.RefractiveIndex, RefractiveIndex, next.RefractiveIndex, nn.RefractiveIndex));
         Glow = Math.Max(0f, w.Interpolate(prev.Glow, Glow, next.Glow, nn.Glow));
+        Roughness = Math.Clamp(w.Interpolate(prev.Roughness, Roughness, next.Roughness, nn.Roughness), 0f, 1f);
+        Absorption = Math.Max(0f, w.Interpolate(prev.Absorption, Absorption, next.Absorption, nn.Absorption));
+
+        // the spline weights do not sum to exactly 1, so a value that is the default in every key
+        // state comes out as 1.0000001 and the like; snap it back, so plain elements stay plain
+        if (Reflectivity <= NegligibleSurface) Reflectivity = 0f;
+        if (RefractiveIndex <= 1f + NegligibleSurface) RefractiveIndex = 1f;
+        if (Roughness <= NegligibleSurface) Roughness = 0f;
+        if (Absorption <= NegligibleSurface) Absorption = 0f;
+        if (MathF.Abs(Glow - 1f) <= NegligibleSurface) Glow = 1f;
 
         ApplyPermanentMotion(time);
     }

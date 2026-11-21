@@ -32,6 +32,10 @@ public sealed class Animation
     [Browsable(false)]
     public ModernSettings Modern { get; } = new();
 
+    /// <summary>Settings of the ray tracer (new in 2.2; stored after the original format).</summary>
+    [Browsable(false)]
+    public RaytraceSettings Raytrace { get; } = new();
+
     /// <summary>Extension records this version does not know (from a newer version); written back unchanged.</summary>
     [Browsable(false)]
     public List<string> UnknownExtensions { get; } = [];

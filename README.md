@@ -17,7 +17,7 @@ The thesis designs and implements **Overbryce Animator**. It is a Windows editor
 
 | Folder | Content |
 |---|---|
-| [`Port/`](Port/README.md) | **Overbryce Animator 2.0**: the port to .NET 10, WinForms and OpenGL 3.3, with tests and documentation. Start here |
+| [`Port/`](Port/README.md) | **Overbryce Animator 2.2**: the port to .NET 10, WinForms and OpenGL 3.3, with a modern renderer, a ray tracer, tests and documentation. Start here |
 | `DIP/SOURCE/` | Original C++ source code (Borland C++ Builder 3, VCL, OpenGL 1.1 and GLU). Kept unchanged |
 | `DIP/SCENES/` | Original sample animations (`*.ani`) and textures. The port loads them in its tests and copies them next to its executable |
 

@@ -1,6 +1,7 @@
 using System.Numerics;
 using OpenTK.Graphics.OpenGL4;
 using Overbryce.Core;
+using Overbryce.Core.Geometry;
 using Overbryce.Core.Model;
 
 namespace Overbryce.App.Rendering;
@@ -305,7 +306,7 @@ internal sealed partial class SceneRenderer : IDisposable
             GL.BindTexture(TextureTarget.Texture2D, cmd.Texture);
         }
         foreach (var r in cmd.Ranges)
-            GL.DrawArrays(r.Mode, r.First, r.Count);
+            GL.DrawArrays(ToGl(r.Mode), r.First, r.Count);
     }
 
     private static Vector4 ToVec(Rgba c) => new(c.R, c.G, c.B, c.A);
@@ -456,37 +457,17 @@ internal sealed partial class SceneRenderer : IDisposable
         if (cmd.Ranges.Count > 0) _commands.Add(cmd);
     }
 
-    private void BuildShape(Element e, List<DrawRange> o, bool lines)
+    private void BuildShape(Element e, List<DrawRange> o, bool lines) => _geometry.Shape(o, e, lines);
+
+    /// <summary>The OpenGL primitive of a range of the shared tessellation.</summary>
+    internal static PrimitiveType ToGl(PrimitiveMode mode) => mode switch
     {
-        switch (e)
-        {
-            case SphereElement s:
-                _geometry.Sphere(o, s.Radius, s.QualityX, s.QualityY, lines);
-                break;
-            case ConeElement c:
-                _geometry.Cylinder(o, c.BaseRadius, c.TopRadius, c.Height, c.QualityX, c.QualityY, lines);
-                break;
-            case DiskElement d:
-                // CDisk passed polomer1 as the inner and polomer2 as the outer radius to gluPartialDisk
-                _geometry.PartialDisk(o, d.InnerRadius, d.OuterRadius, d.QualityX, d.QualityY, 0, d.SweepAngle, lines);
-                break;
-            case TorusElement t:
-                _geometry.Torus(o, t.TubeRadius, t.QualityX, t.RingRadius, t.QualityY, lines);
-                break;
-            case BoxElement b:
-                _geometry.Box(o, b.SizeX, b.SizeY, b.SizeZ, lines);
-                break;
-            case RectangleElement r:
-                _geometry.Rectangle(o, r.SizeX, r.SizeY, lines);
-                break;
-            case TriangleElement tr:
-                _geometry.Triangle(o, tr.X1, tr.Y1, tr.X2, tr.Y2, lines);
-                break;
-            case MeshElement m:
-                _geometry.BezierPatch(o, m.Points, m.CountX, m.CountY, m.QualityX, m.QualityY, lines);
-                break;
-        }
-    }
+        PrimitiveMode.Triangles => PrimitiveType.Triangles,
+        PrimitiveMode.TriangleStrip => PrimitiveType.TriangleStrip,
+        PrimitiveMode.Lines => PrimitiveType.Lines,
+        PrimitiveMode.LineStrip => PrimitiveType.LineStrip,
+        _ => PrimitiveType.LineLoop,
+    };
 
     private bool _shaderAlphaTest;
 

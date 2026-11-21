@@ -86,8 +86,9 @@ Turning off reflections, or lowering *Probes* or *Probe size*, is the main way t
 - **Reflections and refraction** come from cube maps, not from ray tracing.
   - A surface reflects what its probe sees from the centre of the element, so flat mirrors and large surfaces show parallax errors.
   - Glass refracts once and shows the surroundings, not other glass behind it.
-  - The [ray tracing plan](raytracing-plan.md) covers exact reflections and refraction for exported frames.
-- **Shadows** come from point lights. Their softness is a filter width, not the size of a real light, so the edge does not widen with the distance from the occluder. Half-transparent elements either cast a full shadow (opacity 0.5 or more) or none. White-transparent texture parts do let the light through.
+  - The [ray tracer](raytracing.md) (version 2.2) renders exact reflections and refraction for exported frames, snapshots and a preview.
+- **Shadows** come from point lights. Their softness is a filter width, not the size of a real light, so the edge does not widen with the distance from the occluder. Half-transparent elements either cast a full shadow (opacity 0.5 or more) or none, and glass casts none. White-transparent texture parts do let the light through.
+  - A light inside a glowing element (a sun, a bulb) takes that element's size. Elements less than half that size cast no shadow from it; as a point, the light would make a small element next to a sun throw a huge shadow across a planet. The [ray tracer](raytracing.md) lightens such shadows by how much of the glowing body they hide instead.
 - **Ambient occlusion** sees only what is on screen, so occluders outside the picture do not darken anything.
 - **More than four lights:** only the four most important lights cast shadows; the others light the scene without shadows.
 

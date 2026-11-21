@@ -28,7 +28,7 @@ internal sealed class ElementView : ICustomTypeDescriptor
 
     public Element Element { get; }
 
-    private static readonly string[] ModernSurfaceProps = ["Reflectivity", "RefractiveIndex", "Glow"];
+    private static readonly string[] ModernSurfaceProps = ["Reflectivity", "RefractiveIndex", "Glow", "Roughness", "Absorption"];
     private static readonly string[] ModernProps = [.. ModernSurfaceProps, "CastsShadows"];
 
     private IEnumerable<string> Hidden() => Element switch
@@ -46,7 +46,7 @@ internal sealed class ElementView : ICustomTypeDescriptor
         {
             switch (p.Name)
             {
-                case "CastsShadows": return new RenamedProperty(p, "Casts shadows", "8 Light", "The light casts shadows (modern rendering only; at most 'Lights with shadows' lights at a time).");
+                case "CastsShadows": return new RenamedProperty(p, "Casts shadows", "8 Light", "The light casts shadows (modern rendering: at most 'Lights with shadows' lights at a time; ray tracing: every light).");
                 case "Alpha": return new RenamedProperty(p, "Direction X", "3 Spot direction", "X component of the spot direction vector.");
                 case "Beta": return new RenamedProperty(p, "Direction Y", "3 Spot direction", "Y component of the spot direction vector.");
                 case "Gamma": return new RenamedProperty(p, "Direction Z", "3 Spot direction", "Z component of the spot direction vector.");
