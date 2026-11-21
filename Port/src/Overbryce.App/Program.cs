@@ -15,12 +15,31 @@ internal static class Program
             new TypeConverterAttribute(typeof(RgbaConverter)),
             new EditorAttribute(typeof(RgbaEditor), typeof(UITypeEditor)));
 
-        ApplicationConfiguration.Initialize();
-
         // Overbryce.exe file.ani
         // Overbryce.exe file.ani --snapshot out.png [--time 12.5] [--view camera|front|side|top] [--wire] [--size 800x600]
         // Overbryce.exe file.ani --frames outFolder [--from 0] [--to 10] [--view ...] [--wire] [--size 1280x720]
+        // Overbryce.exe file.ani --blender outFolder [--no-blend]
         string? file = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
+        int b = Array.IndexOf(args, "--blender");
+        if (file != null && b >= 0 && b + 1 < args.Length)
+        {
+            AttachConsole(-1);   // a window application: write to the console it was started from
+            Console.WriteLine();
+            try
+            {
+                Environment.ExitCode = Export.BlenderExporter.Run(Path.GetFullPath(file), Path.GetFullPath(args[b + 1]),
+                    !args.Contains("--no-blend"), Console.WriteLine);
+            }
+            catch (Exception ex) when (ex is IOException or Core.IO.AniFormatException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                Console.WriteLine("Export failed: " + ex.Message);
+                Environment.ExitCode = 1;
+            }
+            return;
+        }
+
+        ApplicationConfiguration.Initialize();
+
         SnapshotRequest? snapshot = null;
         int s = Array.IndexOf(args, "--snapshot");
         int f = Array.IndexOf(args, "--frames");
@@ -43,4 +62,7 @@ internal static class Program
 
         Application.Run(new MainForm(file, snapshot));
     }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool AttachConsole(int processId);
 }

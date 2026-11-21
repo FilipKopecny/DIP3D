@@ -14,7 +14,8 @@ Overbryce Animator 1.0 was written in 1998 with Borland C++ Builder 3 and OpenGL
 5. **New features:**
    - click selection in the 3D view (Alt+click selects the group);
    - orbit and zoom in the editor views;
-   - command-line rendering of one picture (`--snapshot`) or of every frame (`--frames`).
+   - command-line rendering of one picture (`--snapshot`) or of every frame (`--frames`);
+   - [export to Blender](blender-export.md) (`--blender`), with the motion carried over exactly as Bezier curves.
 6. **Tests** (`tests/Overbryce.Core.Tests`): 40 xUnit tests.
    - Every original sample and Lumina load, and survive a save and reload unchanged.
    - The interpolation, stopping, permanent motion and camera maths behave as documented.

@@ -94,6 +94,7 @@ To share it, zip that folder. Before you publish again, close any copy of `Overb
 ```text
 Overbryce.exe [file.ani] [--snapshot out.png] [--time seconds] [--view camera|front|side|top] [--wire] [--size WxH]
 Overbryce.exe file.ani --frames folder [--from seconds] [--to seconds] [--view ...] [--wire] [--size WxH]
+Overbryce.exe file.ani --blender folder [--no-blend]
 ```
 
 With `--snapshot`, Overbryce renders one picture and exits without opening the editor:
@@ -106,6 +107,12 @@ With `--frames`, it renders every frame (or those between `--from` and `--to`) a
 
 ```powershell
 Overbryce.exe Scenes\Lumina\Lumina.ani --frames frames --size 1280x720
+```
+
+With `--blender`, it exports the animation to a Blender scene (`.blend`) and exits. It needs Blender installed, or with `--no-blend` it writes only the data and the script that builds the scene. See [Export to Blender](docs/blender-export.md):
+
+```powershell
+Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
 ```
 
 ## Using the editor

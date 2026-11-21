@@ -45,6 +45,12 @@ Every frame of the animation, as PNG files:
 
 Other options: --from and --to (seconds), --view camera|front|side|top, --wire.
 
+A Blender scene (needs Blender installed; writes LuminaBlender\Lumina.blend):
+
+  Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
+
+With --no-blend it writes only the data and overbryce_blender.py, the script that builds the scene.
+
 
 Graphics card
 -------------
