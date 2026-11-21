@@ -197,7 +197,7 @@ internal sealed class Intro
         {
             Radius = MoonR, QualityX = 28, QualityY = 18, Alpha = -90,
             RotationPermanent = true, RotationAngleZ = 360, RotationPeriod = 12,
-        }, C(0.95f, 1f, 0.98f), "Povrch.bmp", ambient: 0.3f, emission: C(0.06f, 0.1f, 0.1f), spec: 0.1f, shine: 0.1f));
+        }, C(0.95f, 1f, 0.98f), "PovrchMore.bmp", ambient: 0.3f, emission: C(0.06f, 0.1f, 0.1f), spec: 0.1f, shine: 0.1f));
         tilt.Add(moonOrbit);
 
         var moonletOrbit = new GroupElement("VDrobecDraha")

@@ -14,8 +14,9 @@ Overbryce.exe      the editor (File > Open starts in the Scenes folder)
 Lumina.cmd         opens the Lumina animation; press F5 to play it
 
 Scenes\            the seven 1998 sample animations with their textures
-Scenes\Lumina\     Lumina, an animation made for the port, and its textures: 64 seconds in all,
-                   a 16-second approach through space, then 48 seconds on the moon
+Scenes\Lumina\     Lumina, an animation made for the port, and its textures: 121 seconds in all,
+                   a 16-second approach through space, 71 seconds on the moon and its
+                   shore, then 34 seconds under the sea
 
 
 Controls

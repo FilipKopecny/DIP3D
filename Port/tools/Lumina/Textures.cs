@@ -35,6 +35,17 @@ internal static class Textures
         Paint(dir, "Prstence.bmp", Rings);
         Paint(dir, "Povrch.bmp", MoonSurface);
         Paint(dir, "Mach.bmp", Moss);
+        Paint(dir, "Ocean.bmp", Ocean);
+        Paint(dir, "PovrchMore.bmp", MoonFromAfar);
+        // the depths
+        Paint(dir, "Dno.bmp", Seabed);
+        Paint(dir, "Skala.bmp", CanyonRock);
+        Paint(dir, "Chaluha.bmp", Kelp);
+        Paint(dir, "Rybka.bmp", Fish);
+        Paint(dir, "Hviezdica.bmp", Starfish);
+        Paint(dir, "Portal.bmp", PortalSwirl);
+        Paint(dir, "Luc.bmp", Beam);
+        Paint(dir, "Podrast.bmp", Undergrowth);
         Paint(dir, "Skafander.bmp", Suit);
         Paint(dir, "Hledi.bmp", Visor);
         Paint(dir, "Panel.bmp", Panel);
@@ -128,6 +139,23 @@ internal static class Textures
         return c;
     }
 
+    /// <summary>The moon as the intro sees it from afar: jungle in patches of colour, the ocean round one pole.</summary>
+    private static Vector3 MoonFromAfar(float u, float v)
+    {
+        float coast = 0.66f + 0.05f * MathF.Sin(u * MathF.PI * 6 + 1) + 0.03f * MathF.Sin(u * MathF.PI * 10 + 2.3f) + 0.04f * (Fbm(u, v, 8, 3, 401) - 0.5f);
+        if (v > coast)
+        {
+            float n = Fbm(u, v, 8, 4, 211);
+            var sea = Vector3.Lerp(new Vector3(0.05f, 0.22f, 0.4f), new Vector3(0.1f, 0.42f, 0.58f), n);
+            return Vector3.Lerp(new Vector3(0.35f, 0.6f, 0.62f), sea, Kit.Smooth(coast, coast + 0.015f, v));   // shallows
+        }
+        var c = MoonSurface(u, v);
+        float trees = Fbm(u, v, 5, 3, 403), fungi = Fbm(u, v, 5, 3, 409);
+        c = Vector3.Lerp(c, new Vector3(0.15f, 0.48f, 0.38f), Kit.Smooth(0.5f, 0.65f, trees) * 0.7f);
+        c = Vector3.Lerp(c, new Vector3(0.62f, 0.3f, 0.6f), Kit.Smooth(0.55f, 0.7f, fungi) * 0.6f);
+        return c;
+    }
+
     private static Vector3 Moss(float u, float v)
     {
         float n = Fbm(u, v, 4, 5, 101), fine = Fbm(u, v, 16, 3, 103), lich = Fbm(u, v, 3, 4, 107);
@@ -139,6 +167,112 @@ internal static class Textures
         if (h > 0.985f) c = new Vector3(0.55f, 0.95f, 0.9f);
         else if (h > 0.955f) c *= 1.35f;
         else if (h < 0.02f) c *= 0.55f;
+        return c;
+    }
+
+    private static Vector3 Ocean(float u, float v)
+    {
+        // deep teal water, lighter swells, a few bright crests
+        float n = Fbm(u, v, 6, 5, 211), fine = Fbm(u, v, 32, 3, 223), swell = Fbm(u, v, 16, 3, 229);
+        var c = Vector3.Lerp(new Vector3(0.03f, 0.17f, 0.33f), new Vector3(0.09f, 0.4f, 0.55f), n);
+        c *= 0.82f + 0.36f * fine;
+        c = Vector3.Lerp(c, new Vector3(0.55f, 0.88f, 0.92f), Kit.Smooth(0.6f, 0.72f, swell) * 0.45f);
+        return c;
+    }
+
+    // ------------------------------------------------------------------ the depths
+
+    private static Vector3 Seabed(float u, float v)
+    {
+        // pale sand with ripples, darker silt and scattered shell bits (tileable: every terrain patch repeats it)
+        float n = Fbm(u, v, 4, 4, 501), ripple = MathF.Sin((u * 6 + 0.6f * Fbm(u, v, 3, 3, 503)) * MathF.PI * 2);
+        var c = Vector3.Lerp(new Vector3(0.45f, 0.48f, 0.42f), new Vector3(0.78f, 0.74f, 0.6f), n);
+        c *= 0.88f + 0.1f * ripple + 0.15f * Fbm(u, v, 32, 2, 507);
+        float h = Hash((int)(u * N), (int)(v * N), 509);
+        if (h > 0.993f) c = new Vector3(0.95f, 0.9f, 0.85f);
+        else if (h < 0.006f) c *= 0.5f;
+        return c;
+    }
+
+    private static Vector3 CanyonRock(float u, float v)
+    {
+        // layered rock: bands along v, cracked and stained
+        float warp = 0.08f * Fbm(u, v, 4, 3, 521);
+        float band = MathF.Sin((v + warp) * MathF.PI * 2 * 7);
+        var c = Vector3.Lerp(new Vector3(0.32f, 0.34f, 0.4f), new Vector3(0.55f, 0.52f, 0.5f), 0.5f + 0.35f * band);
+        c *= 0.75f + 0.45f * Fbm(u, v, 16, 3, 523);
+        if (Fbm(u, v, 12, 2, 527) < 0.3f) c *= 0.6f;                         // cracks
+        c = Vector3.Lerp(c, new Vector3(0.35f, 0.5f, 0.45f), Kit.Smooth(0.6f, 0.75f, Fbm(u, v, 6, 3, 529)) * 0.5f);   // algae
+        return c;
+    }
+
+    private static Vector3 Kelp(float u, float v)
+    {
+        // a long blade: wavy edges (transparent outside), a midrib, golden-olive with darker blotches
+        float half = 0.36f + 0.08f * MathF.Sin(v * 47) + 0.04f * MathF.Sin(v * 113 + 1);
+        float x = MathF.Abs(u - 0.5f);
+        if (x > half) return Clear;
+        var c = Vector3.Lerp(new Vector3(0.3f, 0.45f, 0.14f), new Vector3(0.62f, 0.68f, 0.26f), Fbm(u, v, 8, 3, 541));
+        if (x < 0.035f) c *= 0.7f;
+        c *= 0.85f + 0.2f * MathF.Sin(v * 90);
+        return c;
+    }
+
+    private static Vector3 Fish(float u, float v)
+    {
+        // side view, head to the left: an oval body, a forked tail, an eye
+        float bx = (u - 0.42f) / 0.3f, by = (v - 0.5f) / 0.17f;
+        bool body = bx * bx + by * by < 1;
+        float tx = u - 0.7f;
+        bool tail = tx > 0 && tx < 0.22f && MathF.Abs(v - 0.5f) < 0.04f + 0.9f * tx && MathF.Abs(v - 0.5f) > 0.6f * tx - 0.05f;
+        if (!body && !tail) return Clear;
+        if (Sq(u - 0.24f) + Sq(v - 0.46f) < 0.0012f) return new Vector3(0.05f, 0.05f, 0.08f);
+        var c = Vector3.Lerp(new Vector3(0.95f, 0.75f, 0.3f), new Vector3(0.75f, 0.85f, 0.95f), Kit.Smooth(0.42f, 0.58f, v));
+        if (body && MathF.Sin(u * 40) > 0.6f) c *= 0.75f;                     // stripes
+        return c;
+    }
+
+    private static Vector3 Starfish(float u, float v)
+    {
+        float dx = u - 0.5f, dy = v - 0.5f, r = MathF.Sqrt(dx * dx + dy * dy), a = MathF.Atan2(dy, dx);
+        float arm = 0.1f + 0.36f * MathF.Pow(MathF.Abs(MathF.Cos(2.5f * a)), 3);
+        if (r > arm) return Clear;
+        var c = new Vector3(0.95f, 0.45f, 0.35f) * (0.8f + 0.2f * (1 - r / arm));
+        if (Hash((int)(u * 64), (int)(v * 64), 551) > 0.8f) c = new Vector3(0.98f, 0.82f, 0.6f);
+        return c;
+    }
+
+    private static Vector3 PortalSwirl(float u, float v)
+    {
+        // a spiral of violet and cyan light round a bright core; transparent beyond its rim
+        float dx = u - 0.5f, dy = v - 0.5f, r = MathF.Sqrt(dx * dx + dy * dy) * 2, a = MathF.Atan2(dy, dx);
+        if (r > 0.995f) return Clear;
+        float arms = 0.5f + 0.5f * MathF.Sin(5 * a + 9 * MathF.Log(r + 0.04f));
+        var c = Vector3.Lerp(new Vector3(0.45f, 0.15f, 0.75f), new Vector3(0.3f, 0.85f, 0.95f), arms);
+        c = Vector3.Lerp(c, new Vector3(0.95f, 0.92f, 0.98f), Kit.Smooth(0.35f, 0f, r));
+        c *= 0.75f + 0.3f * Fbm(u, v, 12, 2, 561);
+        return Vector3.Min(c, new Vector3(0.98f));
+    }
+
+    private static Vector3 Beam(float u, float v)
+    {
+        // the lamp's beam: bright at the lamp, fading into the dark water (v runs along the cone)
+        float k = MathF.Pow(1 - v, 1.4f);
+        return new Vector3(0.9f, 0.86f, 0.72f) * (0.06f + 0.9f * k) * (0.92f + 0.08f * Fbm(u, v, 8, 2, 571));
+    }
+
+    private static Vector3 Undergrowth(float u, float v)
+    {
+        // a ragged round clump of leaves, light grey-green so that the element's colour sets the biome's hue;
+        // the corners are white, i.e. transparent, so the overlapping carpets have no straight edges
+        float dx = u - 0.5f, dy = v - 0.5f, r = MathF.Sqrt(dx * dx + dy * dy);
+        if (r > 0.34f + 0.16f * Fbm(u, v, 6, 3, 301)) return Clear;
+        float leaves = Fbm(u, v, 56, 2, 303), veins = Fbm(u, v, 112, 2, 307), shade = Fbm(u, v, 8, 3, 311);
+        var c = Vector3.Lerp(new Vector3(0.3f, 0.33f, 0.32f), new Vector3(0.68f, 0.71f, 0.66f), Kit.Smooth(0.3f, 0.7f, leaves));
+        c *= (0.8f + 0.3f * shade) * (0.88f + 0.18f * veins);
+        float h = Hash((int)(u * N), (int)(v * N), 313);
+        if (h > 0.993f) c = new Vector3(0.99f, 0.97f, 0.7f);              // glowing specks
+        else if (h > 0.985f) c = new Vector3(0.99f, 0.6f, 0.85f);         // tiny pink blossoms
         return c;
     }
 

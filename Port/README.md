@@ -18,7 +18,7 @@ The basic workflow:
 
 ### New sample: Lumina
 
-[samples/Lumina](samples/Lumina/README.md) is a 64-second animation made for the port, with up to 460 elements and hierarchies up to nine levels deep. It opens on a planetary system with nested orbits, where a lander shoots past the camera on its way in. On the moon, an astronaut lands among glowing fungi and crystals and meets one of the locals.
+[samples/Lumina](samples/Lumina/README.md) is a 121-second animation made for the port, with up to 2,717 elements and hierarchies up to eleven levels deep. It opens on a planetary system with nested orbits, where a lander shoots past the camera on its way in. On the moon, an astronaut lands among glowing fungi and crystals and meets one of the locals, who leads him across the jungle to the ocean and down into an underwater canyon.
 
 ![Lumina: the astronaut meets the creature in the crystal grove](docs/images/lumina-meeting.png)
 

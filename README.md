@@ -2,7 +2,7 @@
 
 ![Lumina, an animation made with the port: the astronaut meets one of the locals, and below it the planetary system, the lander's fly-by, the arrival and the landing](Port/docs/images/overbryce-hero.png)
 
-*[Lumina](Port/samples/Lumina/README.md), a 64-second animation made in Overbryce's own 1998 file format and rendered by the port.*
+*[Lumina](Port/samples/Lumina/README.md), a 121-second animation made in Overbryce's own 1998 file format and rendered by the port.*
 
 This repository holds the program from a 1998 diploma thesis and a current port of it:
 

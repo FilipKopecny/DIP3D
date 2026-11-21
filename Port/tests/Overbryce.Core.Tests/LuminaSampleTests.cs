@@ -43,6 +43,28 @@ public class LuminaSampleTests
     }
 
     [Fact]
+    public void No_key_state_uses_more_than_eight_lights()
+    {
+        foreach (var s in Lumina.Value.Scenes)
+        {
+            int lights = s.Descendants().OfType<LightElement>().Count();
+            Assert.True(lights <= 8, $"{s.Name}: {lights} lights");
+        }
+    }
+
+    [Fact]
+    public void The_film_runs_through_the_intro_the_story_and_the_depths_in_order()
+    {
+        var a = Lumina.Value;
+        Assert.True(a.EndTime > 120, $"ends at {a.EndTime}");
+        Assert.All(a.Scenes.Zip(a.Scenes.Skip(1)), p => Assert.True(p.Second.AniTime > p.First.AniTime, p.Second.Name));
+        // the cut into the depths: both key states at the cut stop every motion
+        var cut = a.Scenes.Select((s, i) => (s, i)).First(x => x.s.Descendants().Any(e => e.Name == "HlbkaPozadie")).i;
+        Assert.True(a.Scenes[cut].AniTime > 86);
+        Assert.All(a.Scenes[cut - 1].Descendants().Concat(a.Scenes[cut].Descendants()), e => Assert.True(e.MotionBoundary, e.Name));
+    }
+
+    [Fact]
     public void Round_trip_is_stable()
     {
         string once = AniFile.Serialize(Lumina.Value);

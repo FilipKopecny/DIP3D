@@ -134,6 +134,9 @@ internal static class Kit
     // continuity of angles computed with atan2 (per name, the key states are built in time order)
     private static readonly Dictionary<string, float> LastAngle = new();
 
+    /// <summary>Forgets the angle history (before building the key states again from the start).</summary>
+    public static void ResetUnwrap() => LastAngle.Clear();
+
     public static float Unwrap(string key, float deg)
     {
         if (LastAngle.TryGetValue(key, out float prev))

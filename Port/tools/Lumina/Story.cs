@@ -14,16 +14,29 @@ namespace Lumina;
 /// states with its time-aware Catmull-Rom spline. Element names are unique in the whole scene.
 /// </para>
 /// </summary>
-internal sealed class Story
+internal sealed partial class Story
 {
-    public const float Duration = 48f;
+    public const float Duration = LandEnd + 0.04f;
 
-    /// <summary>1 s apart in the establishing shot and the finale, 0.5 s during the action.</summary>
+    /// <summary>
+    /// 1 s apart in the establishing shot and the happy hops, 0.5 s during the action and the journey, a
+    /// little denser for the creature's leap into the sea. The last key state comes 0.04 s before the
+    /// underwater world, so that the change is a clean cut.
+    /// </summary>
     public static IEnumerable<float> KeyTimes()
     {
         for (int i = 0; i < 8; i++) yield return i;
         for (int i = 0; i < 62; i++) yield return 8 + i * 0.5f;
-        for (int i = 39; i <= 48; i++) yield return i;
+        for (int i = 39; i <= 43; i++) yield return i;
+        for (int i = 87; i <= 141; i++)
+        {
+            float k = i * 0.5f;
+            yield return k;
+            if (k is 65.5f or 66f or 66.5f) yield return k + 0.25f;
+            if (k is 51f or 55f) yield return k + 0.46f;   // the last frame before the flock changes its names: a clean cut
+
+        }
+        yield return LandEnd;
     }
 
     // ------------------------------------------------------------------ the map (angles on the moon in degrees)
@@ -50,6 +63,7 @@ internal sealed class Story
 
     private GroupElement site = null!, lander = null!, grove = null!, creature = null!;
     private GroupElement? head, astro;
+    private readonly List<Vector3> flock = [];   // the mantas following the pair, in world space
 
     private Story(float t, float offset)
     {
@@ -67,25 +81,84 @@ internal sealed class Story
         return story.scene;
     }
 
+    /// <summary>
+    /// The whole moon is in view in the establishing shot and from the crane-out on: there it is the
+    /// planet with the ocean and the flora all over it (<see cref="Planet"/>). The close-ups in between keep
+    /// the original moon; the worlds change at camera cuts (8 s and 39 s).
+    /// </summary>
+    private bool NewWorld => t < 8 || t >= 39;
+
     private void Compose()
     {
         // opaque things first: Overbryce draws in list order without sorting
         Sky();
         Sun();
         Giant();
-        Moon();
+        if (NewWorld)
+        {
+            Planet.AddTerrain(scene);
+            if (Planet.Grown) Planet.AddFlora(scene, t);
+        }
+        else
+        {
+            Moon();
+        }
         Flora();
         Trees();
         Creature();
         // the astronaut first appears inside the lander once the door is half open (a new element pops in at its key state)
         if (t >= 15) Astronaut();
         Lander();
-        Mantas();
+        // the circling flock until the cut to the journey, then the mantas that follow the pair
+        if (t < 48.5f) Mantas();
+        else Svorka();
         // translucent things last
+        if (NewWorld)
+        {
+            Planet.AddSea(scene, t);
+            Splash();
+        }
         Grove();
+        if (NewWorld && Planet.Grown) Planet.AddCrystals(scene, t);
         Jellyfish();
         LanderFlames();
         Cameras();
+        SeaFog();
+    }
+
+    // ================================================================== what the generator needs to know about the film
+
+    /// <summary>The active camera at story time <paramref name="t"/> and the things it shows (for planting and culling).</summary>
+    internal static Culling.Shot Sample(float t, float offset)
+    {
+        var story = new Story(t, offset);
+        story.Compose();
+        var cam = story.scene.ActiveCamera!;
+        var w = Transforms.World(cam);
+        var subjects = new List<Vector3> { World(story.lander, new Vector3(0, 1.3f, 0)), World(story.creature, new Vector3(0, 0.35f, 0)) };
+        if (story.astro != null)
+        {
+            subjects.Add(World(story.astro, new Vector3(0, 0.75f, 0)));
+            subjects.Add(World(story.astro, new Vector3(0, 1.35f, 0)));
+        }
+        // the mantas sweeping low over him must not fly through a plant in front of the camera
+        if (t is >= 48.5f and < 58.5f) subjects.AddRange(story.flock);
+        return new Culling.Shot(t + offset, w.Translation, Vector3.Normalize(Vector3.TransformNormal(-Vector3.UnitZ, w)), cam.FieldOfView,
+            0, Moon: true, NewWorld: story.NewWorld, Subjects: subjects);
+    }
+
+    /// <summary>Where new plants must not grow: the lander, the path, the grove, and the plants of the original film.</summary>
+    internal static IEnumerable<(Vector3 P, float R)> Keepout()
+    {
+        yield return (SurfaceNormal(SiteA, 0) * Ground, 3.8f);
+        for (float a = SiteA; a <= GroveA + 4; a += 1.5f)
+            yield return (SurfaceNormal(a, 0.5f) * Ground, 2.2f);
+        yield return (SurfaceNormal(GroveA, 0) * Ground, 3f);
+        yield return (SurfaceNormal(CreatureA, CreatureS) * Ground, 1.6f);
+        foreach (var m in Mushrooms) yield return (SurfaceNormal(m.A, m.S) * Ground, 1.8f);
+        foreach (var tr in TreeSpecs) yield return (SurfaceNormal(tr.A, tr.S) * Ground, 1.6f);
+        foreach (var (a, s) in ExtraUndergrowth) yield return (SurfaceNormal(a, s) * Ground, 1.3f);
+        yield return (SurfaceNormal(7.5f, -4.4f) * Ground, 1f);
     }
 
     // ================================================================== sky
@@ -190,6 +263,8 @@ internal sealed class Story
         new(-11, 15, 1.3f, 0.6f, C(1f, 0.45f, 0.6f), C(0.7f, 0.9f, 1f), 0.55f),
     ];
 
+    private static readonly (float A, float S)[] ExtraUndergrowth = [(0, -14), (9, 15), (23, -6.5f), (-16, -10), (34, -9), (-2, 9)];
+
     /// <summary>0..1: the crystal flares up when the astronaut touches it.</summary>
     private float Flare => Window(t, 34.9f, 35.2f, 35.6f, 37.5f);
 
@@ -218,7 +293,7 @@ internal sealed class Story
         }
 
         // more undergrowth along the path
-        (float A, float S)[] extra = [(0, -14), (9, 15), (23, -6.5f), (-16, -10), (34, -9), (-2, 9)];
+        var extra = ExtraUndergrowth;
         for (int i = 0; i < extra.Length; i++)
         {
             var (a, s) = extra[i];
@@ -425,7 +500,7 @@ internal sealed class Story
         for (int i = 0; i < specs.Length; i++)
         {
             var (a0, a1, s, h, phase) = specs[i];
-            var anchor = Anchor($"MeduzaMiesto{i}", Lerp(a0, a1, t / Duration), s + 1.2f * Wave(t, 17f, phase));
+            var anchor = Anchor($"MeduzaMiesto{i}", Lerp(a0, a1, t / 48f), s + 1.2f * Wave(t, 17f, phase));
             float pulse = Wave(t, 2f, phase + 0.25f); // -1..1, sampled at its extremes
             var body = new GroupElement($"Meduza{i}") { Y = h + 0.25f * Wave(t, 6f, phase), Gamma = 6 * Wave(t, 4.5f, phase), Alpha = 4 * Wave(t, 5.5f, phase) };
             body.Add(Mat(new SphereElement($"Zvon{i}") { Radius = 0.45f * (1 + 0.1f * pulse), QualityX = 22, QualityY = 14, Alpha = -90 },
@@ -458,19 +533,7 @@ internal sealed class Story
             var orbit = new GroupElement($"MantaKolo{k}") { Gamma = theta };
             var pos = new GroupElement($"Manta{k}") { Y = r + 0.3f * Wave(t, 5f, phase), Z = z };
             var body = new GroupElement($"MantaTelo{k}") { Beta = -90, Gamma = 14 * Wave(t, 6f, phase), Alpha = 5 * Wave(t, 4f, phase) };
-            float flap = Wave(t, 2f, phase); // sampled at +-1 every second
-            float[] chordZ = [0.55f, 0f, -0.45f], spanX = [1.35f, 0.65f, 0f, -0.65f, -1.35f], chord = [0.35f, 0.8f, 1f, 0.8f, 0.35f];
-            var wing = Mesh($"MantaKr{k}", 3, 5, (i, j) =>
-            {
-                float y = (j is 0 or 4 ? 0.6f : j is 1 or 3 ? 0.22f : 0f) * flap + (j == 2 && i == 0 ? 0.08f : 0);
-                return new Vector3(spanX[j], y, chordZ[i] * chord[j]) * scale;
-            }, grid: 8);
-            body.Add(Mat(wing, C(0.92f, 0.88f, 1f), "Manta.bmp", ambient: 0.6f, emission: C(0.13f, 0.1f, 0.24f), spec: 0.5f, shine: 0.4f));
-            var tail = Glow(new ConeElement($"MantaChvost{k}") { BaseRadius = 0.05f * scale, TopRadius = 0.004, Height = 1.0f * scale, QualityX = 6, QualityY = 2 },
-                C(0.5f, 0.85f, 0.95f));
-            Place(tail, new Vector3(0, 0, -0.42f * scale));
-            PointZ(tail, new Vector3(0, -0.08f * flap, -1));
-            body.Add(tail);
+            MantaParts(body, $"MantaKr{k}", $"MantaChvost{k}", scale, Wave(t, 2f, phase)); // flap sampled at +-1 every second
             pos.Add(body);
             orbit.Add(pos);
             spin.Add(orbit);
@@ -479,18 +542,46 @@ internal sealed class Story
         scene.Add(flock);
     }
 
+    /// <summary>The ray of the depths: a manta's shape, larger.</summary>
+    internal static void MantaRay(GroupElement body, float scale, float flap) => MantaParts(body, "RejnokKr", "RejnokChvost", scale, flap);
+
+    /// <summary>A manta's wings and tail in its body group (it flies towards +Z); <paramref name="flap"/> is -1..1.</summary>
+    private static void MantaParts(GroupElement body, string wingName, string tailName, float scale, float flap)
+    {
+        float[] chordZ = [0.55f, 0f, -0.45f], spanX = [1.35f, 0.65f, 0f, -0.65f, -1.35f], chord = [0.35f, 0.8f, 1f, 0.8f, 0.35f];
+        var wing = Mesh(wingName, 3, 5, (i, j) =>
+        {
+            float y = (j is 0 or 4 ? 0.6f : j is 1 or 3 ? 0.22f : 0f) * flap + (j == 2 && i == 0 ? 0.08f : 0);
+            return new Vector3(spanX[j], y, chordZ[i] * chord[j]) * scale;
+        }, grid: 8);
+        body.Add(Mat(wing, C(0.92f, 0.88f, 1f), "Manta.bmp", ambient: 0.6f, emission: C(0.13f, 0.1f, 0.24f), spec: 0.5f, shine: 0.4f));
+        var tail = Glow(new ConeElement(tailName) { BaseRadius = 0.05f * scale, TopRadius = 0.004, Height = 1.0f * scale, QualityX = 6, QualityY = 2 },
+            C(0.5f, 0.85f, 0.95f));
+        Place(tail, new Vector3(0, 0, -0.42f * scale));
+        PointZ(tail, new Vector3(0, -0.08f * flap, -1));
+        body.Add(tail);
+    }
+
     private void Creature()
     {
-        var anchor = Anchor("TvorMiesto", CreatureA, CreatureS);
         // face the astronaut
         var astroWorld = SurfaceNormal(pose.A, pose.S) * Ground;
-        var local = ToLocal(anchor, astroWorld);
-        float heading = Unwrap("tvor", MathF.Atan2(local.X, local.Z) / Deg);
+        var local = ToLocal(Anchor("TvorMiesto", CreatureA, CreatureS), astroWorld);
+        float heading = MathF.Atan2(local.X, local.Z) / Deg;
 
         float pop = Smooth(30.5f, 31f, t) + 0.25f * Window(t, 30.5f, 30.9f, 30.95f, 31.45f);
         float hop = 0.5f * Window(t, 34.7f, 35.2f, 35.3f, 35.8f)
-                    + (t is > 39.5f and < 43.5f ? 0.32f * MathF.Abs(MathF.Sin(MathF.PI * (t - 39.5f) / 2)) : 0)
-                    + (t >= 44 ? 0.18f * MathF.Abs(MathF.Sin(MathF.PI * (t - 44) / 2)) : 0);
+                    + (t is > 39.5f and < 43.5f ? 0.32f * MathF.Abs(MathF.Sin(MathF.PI * (t - 39.5f) / 2)) : 0);
+
+        // from 43.5 it leads the way to the sea (see Journey.cs)
+        float a = CreatureA, s = CreatureS, lift = 0, dive = 0;
+        if (t > JourneyStart)
+        {
+            (a, s, lift, heading, float h, dive) = CreatureJourney(heading);
+            hop += h;
+        }
+        heading = Unwrap("tvor", heading);
+        var anchor = Anchor("TvorMiesto", a, s, lift);
         float y = Lerp(-1.05f, 0, pop) + hop;
         float happy = Smooth(36f, 37.5f, t);
         float squash = 1 + 0.06f * Wave(t, 2f, 0.25f) * (t < 39 ? 1 : 1.5f);
@@ -498,10 +589,18 @@ internal sealed class Story
         float wobble = Wave(t, wobblePeriod, 0.25f);
         float startle = Window(t, 30.8f, 31.1f, 31.4f, 32f);
 
-        creature = new GroupElement("Tvor") { Y = y, Beta = heading, Alpha = -12 * startle + 6 * happy * wobble };
+        creature = new GroupElement("Tvor") { Y = y, Beta = heading, Alpha = -12 * startle + 6 * happy * wobble + dive };
+        CreatureBody(creature, squash, happy, wobble, -25 * startle + 15 * Smooth(31.2f, 32f, t) - 8 * happy + 24 * Beckon * Wave(t, 1f, 0.25f));
+        anchor.Add(creature);
+        scene.Add(anchor);
+    }
+
+    /// <summary>The creature's body, feet, mouth and eye stalks in its group (it faces +Z, its feet at y = 0).</summary>
+    internal static void CreatureBody(GroupElement creature, float squash, float happy, float wobble, float stalkPitch, float glow = 0)
+    {
         float r = 0.32f * squash;
         var bodySphere = Mat(new SphereElement("TvorTelo") { Radius = r, QualityX = 22, QualityY = 16, Alpha = -90 },
-            C(0.95f, 0.75f, 1f), "FialovyMramor.bmp", ambient: 0.6f, emission: C(0.16f, 0.06f, 0.22f), spec: 0.5f, shine: 0.4f);
+            C(0.95f, 0.75f, 1f), "FialovyMramor.bmp", ambient: 0.6f, emission: C(0.16f + 0.3f * glow, 0.06f + 0.2f * glow, 0.22f + 0.45f * glow), spec: 0.5f, shine: 0.4f);
         Place(bodySphere, new Vector3(0, r, 0));
         creature.Add(bodySphere);
         var belly = Mat(new SphereElement("TvorBrucho") { Radius = 0.2f * squash, QualityX = 16, QualityY = 12 },
@@ -528,12 +627,13 @@ internal sealed class Story
             Place(joint, new Vector3(side * 0.12f, 1.85f * r, 0));
             var stalk = new GroupElement($"TvorOko{n}")
             {
-                Alpha = -25 * startle + 15 * Smooth(31.2f, 32f, t) - 8 * happy,
+                Alpha = stalkPitch,
                 Gamma = -side * (10 + 14 * happy * wobble * side),
             };
             stalk.Add(Mat(new ConeElement($"TvorStopka{n}") { BaseRadius = 0.028, TopRadius = 0.02, Height = 0.28, QualityX = 8, QualityY = 2, Alpha = -90 },
                 C(0.7f, 0.45f, 0.9f), ambient: 0.6f, emission: C(0.1f, 0.04f, 0.14f)));
-            var eye = Mat(new SphereElement($"TvorOcko{n}") { Radius = 0.085, QualityX = 14, QualityY = 10 }, C(0.96f, 0.96f, 0.92f), ambient: 0.7f, emission: C(0.25f, 0.25f, 0.22f), spec: 0.8f, shine: 0.6f);
+            var eye = Mat(new SphereElement($"TvorOcko{n}") { Radius = 0.085, QualityX = 14, QualityY = 10 }, C(0.96f, 0.96f, 0.92f), ambient: 0.7f,
+                emission: Mul(C(0.25f, 0.25f, 0.22f), 1 + 2.5f * glow), spec: 0.8f, shine: 0.6f);
             Place(eye, new Vector3(0, 0.31f, 0));
             stalk.Add(eye);
             var pupil = Mat(new SphereElement($"TvorZrenicka{n}") { Radius = 0.042, QualityX = 10, QualityY = 8 }, C(0.05f, 0.05f, 0.1f), ambient: 0.5f, spec: 1f, shine: 0.9f);
@@ -542,13 +642,11 @@ internal sealed class Story
             joint.Add(stalk);
             creature.Add(joint);
         }
-        anchor.Add(creature);
-        scene.Add(anchor);
     }
 
     // ================================================================== the astronaut
 
-    private sealed class Pose
+    internal sealed class Pose
     {
         public float A, S, H, Heading, Pitch;
         public float Drop, Lean, Twist, HeadYaw, HeadPitch;
@@ -556,6 +654,9 @@ internal sealed class Story
         public float SwingR, AbdR = -12, BendR = -18, WaveR;
         public float HipL, HipR, KneeL, KneeR;
         public float Lamp;
+
+        /// <summary>The helmet lamp as a spot light: brightness at Lamp = 1, cone half-angle, linear attenuation.</summary>
+        public float LampPower = 0.9f, LampCutoff = 28, LampExponent = 8, LampLinear = 0.15f;
     }
 
     private static float SolveRamp()
@@ -653,7 +754,7 @@ internal sealed class Story
         // step back from the dazzling crystal, then turn to the creature
         p.A -= 1.6f * Smooth(35.6f, 36.6f, t);
         Gait(p, 2 * MathF.PI * (t - 35.6f) / 2f, Window(t, 35.6f, 35.8f, 36.4f, 36.6f), 10);
-        p.Heading += Lerp(0, 35, Smooth(36.5f, 37.5f, t)) - Lerp(0, 25, Smooth(43.5f, 45f, t));
+        p.Heading += Lerp(0, 35, Smooth(36.5f, 37.5f, t));
         p.HeadYaw += 10 * Window(t, 36.6f, 37.4f, 43.5f, 44.5f);
         float wave2 = Window(t, 37.4f, 37.8f, 38.8f, 39.3f); // with the left arm, the one nearer the meeting camera
         p.AbdL += 128 * wave2;
@@ -669,12 +770,8 @@ internal sealed class Story
             p.AbdL += 50 * air; p.AbdR -= 50 * air;
         }
 
-        // ---- look up at the departing camera and wave with both arms
-        float farewell = Smooth(44f, 45f, t);
-        p.HeadPitch -= 35 * farewell;
-        p.AbdL += 138 * farewell; p.AbdR -= 138 * farewell;
-        float flutter = Wave(t, 2f, 0.25f) * Smooth(45f, 46f, t);
-        p.WaveL += 25 * flutter; p.WaveR -= 25 * flutter;
+        // ---- the journey to the ocean (see Journey.cs)
+        if (t > JourneyStart) Journey(p, t);
         return p;
     }
 
@@ -706,7 +803,14 @@ internal sealed class Story
         var p = pose;
         var rig = Anchor("AstroRig", p.A, p.S);
         astro = new GroupElement("Astronaut") { Y = p.H, Alpha = p.Pitch, Beta = p.Heading };
+        head = AstronautBody(astro, p, t);
+        rig.Add(astro);
+        scene.Add(rig);
+    }
 
+    /// <summary>The astronaut's body in its group (he faces +Z, feet at y = 0), posed by <paramref name="p"/>. Returns the head group.</summary>
+    internal static GroupElement AstronautBody(GroupElement astro, Pose p, float t)
+    {
         var suit = C(0.95f, 0.95f, 0.93f);
         T Suit<T>(T e) where T : Element => Mat(e, suit, "Skafander.bmp", ambient: 0.62f, emission: C(0.05f, 0.05f, 0.06f), spec: 0.35f, shine: 0.25f);
         T Metal<T>(T e, float v = 0.45f) where T : Element => Mat(e, Gray(v), ambient: 0.6f, spec: 0.8f, shine: 0.5f);
@@ -719,7 +823,7 @@ internal sealed class Story
         torso.Add(Suit(new BoxElement("Batoh") { SizeX = 0.4f, SizeY = 0.42f, SizeZ = 0.18f, Y = 0.2f, Z = -0.3f }));
 
         var neck = new GroupElement("Krk") { Y = 0.36f };
-        head = new GroupElement("Hlava") { Alpha = p.HeadPitch, Beta = p.HeadYaw };
+        var head = new GroupElement("Hlava") { Alpha = p.HeadPitch, Beta = p.HeadYaw };
         var helmet = Suit(new SphereElement("Prilba") { Radius = 0.3, QualityX = 24, QualityY = 18, Alpha = -90 });
         Place(helmet, new Vector3(0, 0.24f, 0));
         head.Add(helmet);
@@ -740,8 +844,8 @@ internal sealed class Story
         var blink = Glow(new SphereElement("AntenaSvetlo") { Radius = 0.03, QualityX = 8, QualityY = 6 }, Mul(C(1f, 0.25f, 0.2f), 0.35f + 0.6f * MathF.Max(0, Wave(t, 1f, 0.25f))));
         Place(blink, new Vector3(-0.16f, 0.69f, -0.08f));
         head.Add(blink);
-        head.Add(Light("SvetloPrilba", new Vector3(0.22f, 0.36f, 0.25f), Mul(C(1f, 0.95f, 0.82f), 0.9f * p.Lamp), dir: new Vector3(0, -0.18f, 1),
-            cutoff: 28, exponent: 8, linear: 0.15f));
+        head.Add(Light("SvetloPrilba", LampPosition, Mul(C(1f, 0.95f, 0.82f), p.LampPower * p.Lamp), dir: LampDirection,
+            cutoff: p.LampCutoff, exponent: p.LampExponent, linear: p.LampLinear));
         head.Add(new CameraElement("KamPrilba") { Y = 0.26f, Z = 0.36f, Beta = 180, Alpha = -6, FieldOfView = 62 });
         neck.Add(head);
         torso.Add(neck);
@@ -753,9 +857,11 @@ internal sealed class Story
         Leg(pelvis, "P", -1, p.HipR, p.KneeR, Suit);
 
         astro.Add(pelvis);
-        rig.Add(astro);
-        scene.Add(rig);
+        return head;
     }
+
+    /// <summary>Where the helmet lamp is in the head group, and where it shines.</summary>
+    internal static readonly Vector3 LampPosition = new(0.22f, 0.36f, 0.25f), LampDirection = new(0, -0.18f, 1);
 
     // his left is +X (he faces +Z)
     private static void Arm(GroupElement torso, string n, int side, float swing, float abd, float bend, float wave, Func<Element, Element> suit)
@@ -946,6 +1052,11 @@ internal sealed class Story
 
     private void Cameras()
     {
+        if (t >= JourneyStart)
+        {
+            JourneyCameras();
+            return;
+        }
         var landerWorld = World(lander, new Vector3(0, 1.3f, 0));
         var chest = astro is null ? World(site, new Vector3(0, 1.5f, 0.5f)) : World(astro, new Vector3(0, 0.75f, 0));
 
@@ -992,15 +1103,8 @@ internal sealed class Story
         Aim(cam6b, (ToLocal(grove, chest) + creatureLocal) / 2 + new Vector3(0, 0.05f, 0));
         grove.Add(cam6b);
 
-        // 7. finale (39 .. 48): crane up and away until the whole moon is in view
-        var cam7 = new CameraElement("KamFinale") { FieldOfView = Lerp(44, 52, Smooth(39, 47, t)) };
-        var start = World(grove, new Vector3(-2.6f, 1.5f, 1.8f));
-        var end = Vector3.Normalize(new Vector3(0.5f, 0.85f, 0.65f)) * 24f;
-        float k = Smooth(40f, 47.5f, t);
-        var path = Lerp(start, end, k) + Vector3.Normalize(start) * 4f * MathF.Sin(MathF.PI * k);
-        Place(cam7, path);
-        Aim(cam7, Lerp(chest, new Vector3(0, 3.5f, 0), Smooth(40.5f, 47f, t)));
-        scene.Add(cam7);
+        // 7. the crane-out (39 .. 48.5)
+        var cam7 = Crane(chest);
 
         var helmet = (CameraElement?)head?.FindChild("KamPrilba");
         CameraElement active = t switch
@@ -1016,4 +1120,21 @@ internal sealed class Story
         };
         scene.SetActiveCamera(active);
     }
+
+    /// <summary>Crane up and away until the whole moon is in view.</summary>
+    private CameraElement Crane(Vector3 chest)
+    {
+        var cam7 = new CameraElement("KamFinale") { FieldOfView = Lerp(44, 52, Smooth(39, 47, t)) };
+        var start = World(grove, new Vector3(-2.6f, 1.5f, 1.8f));
+        // once the pair sets off (43.5), the crane swings round towards the ocean they are heading for
+        float swing = Smooth(42.5f, 46.5f, t);
+        var end = Lerp(Vector3.Normalize(new Vector3(0.5f, 0.85f, 0.65f)) * 24f, Planet.RouteFrame(33, 2) * 28f, swing);
+        float k = Smooth(40f, 47.5f, t);
+        var path = Lerp(start, end, k) + Vector3.Normalize(start) * 4f * MathF.Sin(MathF.PI * k);
+        Place(cam7, path);
+        Aim(cam7, Lerp(chest, Lerp(new Vector3(0, 3.5f, 0), Planet.RouteFrame(20, 0) * 1.2f, swing), Smooth(40.5f, 47f, t)));
+        scene.Add(cam7);
+        return cam7;
+    }
 }
+
