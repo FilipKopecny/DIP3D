@@ -159,6 +159,10 @@ internal sealed partial class Story
         foreach (var tr in TreeSpecs) yield return (SurfaceNormal(tr.A, tr.S) * Ground, 1.6f);
         foreach (var (a, s) in ExtraUndergrowth) yield return (SurfaceNormal(a, s) * Ground, 1.3f);
         yield return (SurfaceNormal(7.5f, -4.4f) * Ground, 1f);
+        // under the mantas gathered round him at the shore
+        foreach (var f in Fliers)
+            foreach (float time in new[] { GatherEnd, 64.5f, 66.5f, 68.2f, 69.5f })
+                yield return (Vector3.Normalize(RingPoint(f, time)) * Ground, 1.6f);
     }
 
     // ================================================================== sky
@@ -546,7 +550,7 @@ internal sealed partial class Story
     internal static void MantaRay(GroupElement body, float scale, float flap) => MantaParts(body, "RejnokKr", "RejnokChvost", scale, flap);
 
     /// <summary>A manta's wings and tail in its body group (it flies towards +Z); <paramref name="flap"/> is -1..1.</summary>
-    private static void MantaParts(GroupElement body, string wingName, string tailName, float scale, float flap)
+    private static void MantaParts(GroupElement body, string wingName, string tailName, float scale, float flap, bool rigidTail = true)
     {
         float[] chordZ = [0.55f, 0f, -0.45f], spanX = [1.35f, 0.65f, 0f, -0.65f, -1.35f], chord = [0.35f, 0.8f, 1f, 0.8f, 0.35f];
         var wing = Mesh(wingName, 3, 5, (i, j) =>
@@ -555,11 +559,41 @@ internal sealed partial class Story
             return new Vector3(spanX[j], y, chordZ[i] * chord[j]) * scale;
         }, grid: 8);
         body.Add(Mat(wing, C(0.92f, 0.88f, 1f), "Manta.bmp", ambient: 0.6f, emission: C(0.13f, 0.1f, 0.24f), spec: 0.5f, shine: 0.4f));
+        if (!rigidTail) return;
         var tail = Glow(new ConeElement(tailName) { BaseRadius = 0.05f * scale, TopRadius = 0.004, Height = 1.0f * scale, QualityX = 6, QualityY = 2 },
             C(0.5f, 0.85f, 0.95f));
         Place(tail, new Vector3(0, 0, -0.42f * scale));
         PointZ(tail, new Vector3(0, -0.08f * flap, -1));
         body.Add(tail);
+    }
+
+    /// <summary>
+    /// A soft tail for the flock that follows the pair: shorter, thinner and dimmer than the rigid glowing spike of the
+    /// circling flock, in three jointed pieces that droop and curl after the wing beat like a ribbon.
+    /// </summary>
+    private static void SoftTail(GroupElement body, string tailName, float scale, float t, float phase)
+    {
+        float piece = 0.26f * scale;
+        float[] radius = [0.032f, 0.022f, 0.012f, 0.003f];
+        var root = new GroupElement(tailName) { Z = -0.4f * scale };
+        GroupElement joint = new($"{tailName}Smer") { Beta = 180 + 10 * Wave(t, 2f, phase + 0.1f), Alpha = -6 };   // backwards, drooping a little
+        root.Add(joint);
+        for (int i = 0; i < 3; i++)
+        {
+            joint.Add(Mat(new ConeElement($"{tailName}{i}") { BaseRadius = radius[i] * scale, TopRadius = radius[i + 1] * scale, Height = piece, QualityX = 6, QualityY = 1 },
+                C(0.55f, 0.6f, 0.85f), ambient: 0.6f, emission: C(0.12f, 0.2f, 0.28f), spec: 0.3f, shine: 0.3f));
+            if (i == 2) break;
+            var hinge = new GroupElement($"{tailName}Klb{i}") { Z = piece };
+            var bend = new GroupElement($"{tailName}Ohyb{i}")
+            {
+                Beta = 16 * Wave(t, 2f, phase + 0.1f - 0.15f * (i + 1)),   // the curl travels down the tail after the wing beat
+                Alpha = -7,
+            };
+            hinge.Add(bend);
+            joint.Add(hinge);
+            joint = bend;
+        }
+        body.Add(root);
     }
 
     private void Creature()

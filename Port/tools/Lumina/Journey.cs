@@ -50,7 +50,7 @@ internal sealed partial class Story
     private static float CreatureDistance(float t)
         => Travel(t, CreatureGo, CreatureStop, Planet.BeachDistance + 0.25f, 1.2f)
            + 0.95f * Clamp01((t - Jump) / 0.8f)
-           + 1.8f * Smooth(68.8f, 71.5f, t);
+           + 2.2f * Smooth(68.2f, 69.6f, t);   // off into the sea, so it is gone when he dives
 
     private static float AstroDistance(float t)
         => Travel(t, AstroGo, AstroStop, AstroLead + Planet.BeachDistance - 0.6f, 1.2f)
@@ -114,10 +114,17 @@ internal sealed partial class Story
     private (float A, float S, float Lift, float Heading, float Hop, float Pitch) CreatureJourney(float face)
     {
         var (n, dir) = CreaturePath.At(CreatureDistance(t));
+        n = CreatureAt(t);
         var (a, s) = Planet.Angles(n);
         float ground = Planet.SurfaceRadius(n) - Ground;
         float yaw = BlendAngle(face, Planet.Heading(n, dir), Smooth(JourneyStart, CreatureGo + 0.3f, t));
-        yaw += 180 * (Smooth(66.3f, 66.9f, t) - Smooth(68.4f, 69f, t));   // turns back to the shore to call him
+        yaw += 180 * (Smooth(66.3f, 66.9f, t) - Smooth(68.15f, 68.65f, t));   // turns back to the shore to call him
+        // and swims off where it goes: out to sea and aside, out of his way
+        if (t > 68.2f)
+        {
+            var v = CreatureAt(t + 0.1f) - CreatureAt(t - 0.1f);
+            yaw = BlendAngle(yaw, Planet.Heading(n, v - n * Vector3.Dot(n, v)), Smooth(68.2f, 68.6f, t));
+        }
 
         float walking = Window(t, CreatureGo - 0.3f, CreatureGo + 0.2f, CreatureStop - 0.3f, CreatureStop + 0.1f);
         float hop = 0.26f * MathF.Abs(MathF.Sin(MathF.PI * (t - 44f))) * walking;
@@ -127,17 +134,26 @@ internal sealed partial class Story
             // the leap: an arc into the sea; under, up again to call him (half out of the water), and away
             float u = Clamp01((t - Jump) / 0.8f);
             float sea = Planet.Sea - Ground;
-            float target = sea - 0.62f + 0.3f * Smooth(66.4f, 66.9f, t) - 0.5f * Smooth(68.6f, 69.3f, t)
-                           + 0.035f * Wave(t, 1f, 0.25f) * Window(t, 66.9f, 67.2f, 68.3f, 68.6f);
+            // ... and it dives right under, eyes and all, before he wades in after it: the sea is shallower than it is
+            // tall, so it goes down to the seabed and tips nose down, which keeps even its eye stalks under the water
+            float target = sea - 0.62f + 0.3f * Smooth(66.4f, 66.9f, t) - 1.6f * Smooth(68.2f, 68.7f, t)
+                           + 0.035f * Wave(t, 1f, 0.25f) * Window(t, 66.9f, 67.2f, 68f, 68.3f);
             lift = MathF.Max(Lerp(ground, target, u) + 0.7f * MathF.Sin(MathF.PI * u), ground + 0.02f);
-            pitch = 35 * MathF.Sin(MathF.PI * u);
+            pitch = 35 * MathF.Sin(MathF.PI * u) + 75 * Smooth(68.2f, 68.65f, t);
             hop = 0;
         }
         return (a, s, lift, yaw, hop, pitch);
     }
 
+    /// <summary>
+    /// Where the creature is: along its route, and at the end aside from it, so that when the astronaut wades in and
+    /// dives it is well out of his view rather than right in front of him.
+    /// </summary>
+    private static Vector3 CreatureAt(float time)
+        => CreaturePath.Beside(CreatureDistance(time), 3.6f * Smooth(68.2f, 69.5f, time));
+
     /// <summary>0..1 while the creature, half out of the water, nods its eyes to call him in.</summary>
-    private float Beckon => Window(t, 66.8f, 67.1f, 68.2f, 68.5f);
+    private float Beckon => Window(t, 66.8f, 67.1f, 67.9f, 68.2f);
 
     // ================================================================== the mantas follow them
 
@@ -149,23 +165,41 @@ internal sealed partial class Story
     /// <item>B, the tracking shot: it glides in from the far sky (<c>FromB</c>) towards the camera and past the pair
     /// (<c>ToB</c>), given in the view of the camera (x right, y up, z depth), so that the flock is always in the picture,
     /// and seen coming on, with its wings spread;</item>
-    /// <item>C, over his shoulder: it sweeps over him again from <c>FromC</c> to <c>ToC</c>, then rises and glides ahead.</item>
+    /// <item>C, over his shoulder: it sweeps over him again from <c>FromC</c> to <c>ToC</c>, then rises and glides ahead;
+    /// at the shore it comes back and gathers round him in a loose arc (at the angle <c>Ring</c> from the way ahead,
+    /// <c>RingRadius</c> away and <c>RingHeight</c> up), its nose turned to him and its tail outwards.</item>
     /// </list>
     /// Each part has its own element names and starts at a cut, so the manta can start each sweep where it needs to.
     /// </summary>
     private readonly record struct Flier(float Scale, float Phase, int Order,
         float FromA, float ToA, float SideA, float LowA,
         Vector3 FromB, Vector3 ToB,
-        float FromC, float ToC, float SideC, float SideD, float LowC, float HighC);
+        float FromC, float ToC, float SideC, float SideD, float LowC, float HighC,
+        float Ring, float RingRadius, float RingHeight);
 
     private static readonly Flier[] Fliers =
     [
-        new(0.80f, 0.25f, 0, -4.5f, 4.5f, -0.5f, 2.4f, new(1.5f, 1.5f, 10f), new(-1.6f, 1.4f, 4.5f), -4.0f, 6.0f, -1.3f, -0.9f, 2.2f, 4.2f),
-        new(0.90f, 0.75f, 1, -5.5f, 3.6f, 0.6f, 2.5f, new(2.8f, 0.9f, 11f), new(-0.2f, 0.9f, 5.5f), -4.8f, 5.0f, 0.6f, 1.1f, 2.3f, 4.8f),
-        new(1.00f, 0.25f, 2, -6.5f, 6.0f, 0.1f, 2.4f, new(0.6f, 2.2f, 12f), new(-2.6f, 1.9f, 6.5f), -5.5f, 7.5f, 0.2f, 0.2f, 2.2f, 5.3f),
-        new(0.75f, 0.75f, 3, -7.0f, 3.2f, 0.9f, 2.6f, new(3.2f, 1.8f, 9f), new(0.4f, 1.6f, 4.0f), -6.3f, 4.5f, 1.1f, -0.3f, 2.4f, 5.6f),
-        new(0.70f, 0.25f, 4, -8.0f, 5.4f, -0.9f, 2.4f, new(-0.2f, 1.0f, 13f), new(-3.0f, 1.0f, 7.5f), -7.0f, 6.5f, -0.9f, 1.4f, 2.1f, 4.0f),
+        new(0.80f, 0.25f, 0, -4.5f, 4.5f, -0.5f, 2.4f, new(1.5f, 1.5f, 10f), new(-1.6f, 1.4f, 4.5f), -4.0f, 6.0f, -1.3f, -0.9f, 2.2f, 4.2f, 100, 2.6f, 1.9f),
+        new(0.90f, 0.75f, 1, -5.5f, 3.6f, 0.6f, 2.5f, new(2.8f, 0.9f, 11f), new(-0.2f, 0.9f, 5.5f), -4.8f, 5.0f, 0.6f, 1.1f, 2.3f, 4.8f, 125, 3.2f, 2.4f),
+        new(1.00f, 0.25f, 2, -6.5f, 6.0f, 0.1f, 2.4f, new(0.6f, 2.2f, 12f), new(-2.6f, 1.9f, 6.5f), -5.5f, 7.5f, 0.2f, 0.2f, 2.2f, 5.3f, 150, 2.7f, 2.1f),
+        new(0.75f, 0.75f, 3, -7.0f, 3.2f, 0.9f, 2.6f, new(3.2f, 1.8f, 9f), new(0.4f, 1.6f, 4.0f), -6.3f, 4.5f, 1.1f, -0.3f, 2.4f, 5.6f, 175, 3.3f, 2.5f),
+        new(0.70f, 0.25f, 4, -8.0f, 5.4f, -0.9f, 2.4f, new(-0.2f, 1.0f, 13f), new(-3.0f, 1.0f, 7.5f), -7.0f, 6.5f, -0.9f, 1.4f, 2.1f, 4.0f, 200, 2.8f, 1.8f),
     ];
+
+    /// <summary>At the shore the flock gathers round him: from the first time to the second.</summary>
+    private const float GatherStart = 60f, GatherEnd = 63f;
+
+    private static float Gathered(float time) => Smooth(GatherStart, GatherEnd, time);
+
+    /// <summary>Manta <paramref name="f"/>'s place in the arc round the astronaut at the shore (over the water where he wades).</summary>
+    private static Vector3 RingPoint(Flier f, float time)
+    {
+        var (n, dir) = AstroPath.At(AstroDistance(time));
+        var left = Vector3.Cross(n, dir);
+        float angle = (f.Ring + 10 * Wave(time, 9f, f.Phase)) * Deg;
+        var at = Vector3.Normalize(n * Ground + (dir * MathF.Cos(angle) + left * MathF.Sin(angle)) * f.RingRadius);
+        return at * (MathF.Max(Planet.SurfaceRadius(at), Planet.Sea) + f.RingHeight + 0.12f * Wave(time, 4f, f.Phase));
+    }
 
     /// <summary>The cuts between the three parts of the flock's flight: to the tracking shot, and to the shot over the shoulder.</summary>
     private const float FlockB = 51.5f, FlockC = 55.5f;
@@ -214,7 +248,8 @@ internal sealed partial class Story
         }
         float dk = d + rel + 0.25f * Wave(time, 9f, f.Phase);
         var n = AstroPath.Beside(dk, side + 0.3f * Wave(time, 7f, f.Phase + 0.3f));
-        return n * (Planet.SurfaceRadius(n) + height + 0.15f * Wave(time, 5f, f.Phase));
+        var p = n * (Planet.SurfaceRadius(n) + height + 0.15f * Wave(time, 5f, f.Phase));
+        return time > GatherStart ? Lerp(p, RingPoint(f, time), Gathered(time)) : p;
     }
 
     /// <summary>
@@ -233,7 +268,15 @@ internal sealed partial class Story
         var n = FlierUp(f, time);
         var v = FlierAt(f, MathF.Min(time + 0.1f, to)) - FlierAt(f, MathF.Max(time - 0.1f, from));
         v -= n * Vector3.Dot(n, v);
-        return Planet.Heading(n, v + 0.12f * AstroPath.At(AstroDistance(time)).Dir);
+        var (hero, dir) = AstroPath.At(AstroDistance(time));
+        float flight = Planet.Heading(n, v + 0.12f * dir);
+        if (time <= GatherStart) return flight;
+
+        // gathered round him at the shore: nose to him, tail outwards
+        var toHero = hero * Ground - FlierAt(f, time);
+        toHero -= n * Vector3.Dot(n, toHero);
+        float facing = Planet.Heading(n, toHero) + 6 * Wave(time, 5f, f.Phase + 0.4f);
+        return BlendAngle(flight, facing, Smooth(GatherStart + 0.6f, GatherEnd + 0.4f, time));
     }
 
     private void Svorka()
@@ -256,7 +299,8 @@ internal sealed partial class Story
                 Gamma = Math.Clamp(-0.6f * turn, -30, 30) + 8 * Wave(t, 6f, f.Phase + 0.2f),
                 Alpha = 4 * Wave(t, 4f, f.Phase),
             };
-            MantaParts(body, $"{name}Kr{k}", $"{name}Chvost{k}", f.Scale, Wave(t, 2f, f.Phase));
+            MantaParts(body, $"{name}Kr{k}", $"{name}Chvost{k}", f.Scale, Wave(t, 2f, f.Phase), rigidTail: false);
+            SoftTail(body, $"{name}Chvost{k}", f.Scale, t, f.Phase);
             // the offset in a group of its own: a group translates before it rotates, so it must not bank
             var place = new GroupElement($"{name}Poz{k}") { X = local.X, Y = local.Y, Z = local.Z };
             place.Add(body);
@@ -290,7 +334,7 @@ internal sealed partial class Story
 
         // ripples round the creature calling from the water, and round his waist as he wades
         if (t >= 66 && t <= 69.5f)
-            Ripple("VlnkyTvor", CreaturePath.At(CreatureDistance(t)).N, 0.33f, Window(t, 66.5f, 66.9f, 68.6f, 69.1f));
+            Ripple("VlnkyTvor", CreatureAt(t), 0.33f, Window(t, 66.5f, 66.9f, 68.2f, 68.7f));
         if (t >= Wade)
             Ripple("Vlnky", AstroPath.At(AstroDistance(t)).N, 0.3f, Window(t, Wade + 0.3f, Wade + 0.8f, Dive + 0.2f, Dive + 0.8f));
     }

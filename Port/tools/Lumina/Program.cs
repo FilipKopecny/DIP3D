@@ -30,7 +30,7 @@ foreach (var shot in shots.Where(s => s.NewWorld).Where((_, i) => i % 2 == 0))
 Planet.Keepout.AddRange(Story.Keepout());
 Planet.GrowFlora();
 Console.WriteLine($"Flora: {Planet.Colonies.Count} colonies, {Planet.Colonies.Sum(c => c.Members.Count)} plants, {Planet.Carpets.Count} carpets of undergrowth ({clock.ElapsedMilliseconds} ms)");
-Console.WriteLine($"Route:{Planet.BeachDistance:0.0} units to the beach, {Planet.WadeDistance:0.0} to the wading point; creature ahead by {Story.Gaps()}");
+Console.WriteLine($"Route: {Planet.BeachDistance:0.0} units to the beach, {Planet.WadeDistance:0.0} to the wading point; creature ahead by {Story.Gaps()}");
 
 // pass 2: the key states
 clock.Restart();

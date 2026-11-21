@@ -41,8 +41,8 @@ dotnet run --project src\Overbryce.App -- samples\Lumina\Lumina.ani --frames out
 | 67.5–71.5 | `KamCesta` | A tilted tracking shot along the route: the manta flock glides in from the sky and over the pair |
 | 71.5–74.5 | `KamRameno` | Over his shoulder: the mantas come from behind, sweep over him as he looks up, and fly on along the way |
 | 74.5–77.5 | `KamPole` | A high shot over the jungle as they cross a clearing |
-| 77.5–81.5 | `KamBreh` | Low over the water: they reach the shore; the creature leaps |
-| 81.5–85 | `KamPozvanie` | It splashes into the sea, turns back and beckons; he waves back and walks in |
+| 77.5–81.5 | `KamBreh` | Low over the water: they reach the shore, the mantas settle round him with their noses turned to him, and the creature leaps |
+| 81.5–85 | `KamPozvanie` | It splashes into the sea, turns back and beckons; he waves back, and as he walks in it dives and swims off under the water, the mantas hovering beyond him |
 | 85–87 | `KamPrilba` | First person: wading out; he dives at 86.1 s and the sea fog closes in |
 | 87–91 | `KamHladina` | Under the surface, in shafts of light: the two swim down together |
 | 91–95 | `KamPrilba` | First person: following the creature down towards the canyon, past a fish school |
@@ -80,7 +80,7 @@ Most of the motion comes from nested groups. Each group rotates about its parent
 
 Key states are 0.04 to 1 s apart, closer where the motion is fast, 247 in all. Overbryce's time-aware Catmull-Rom spline fills in the 3,025 frames in between.
 
-The manta flock that follows the pair changes its element names at two camera cuts, with a key state one frame before each, the same way as the cut from the opening. Each of its three sweeps can then start where its shot needs it. On so small a moon the ground under a manta a few units away is tilted by tens of degrees, so in the tracking shot the mantas fly level with the camera's ground rather than their own, or they would look rolled on edge.
+The manta flock that follows the pair changes its element names at two camera cuts, with a key state one frame before each, the same way as the cut from the opening. Each of its three sweeps can then start where its shot needs it. On so small a moon the ground under a manta a few units away is tilted by tens of degrees, so in the tracking shot the mantas fly level with the camera's ground rather than their own, or they would look rolled on edge. At the shore they gather in a loose arc on his far side, noses to him and tails outwards. Their tails are softer than the circling flock's glowing spikes: three short, dim, jointed pieces that droop and curl after the wing beat.
 
 The jungle has about 2,700 elements in the busiest key state. To keep the file and the rendering manageable, the generator samples the cameras every 0.1 s and at every key state, and leaves out each scenery group that no camera sees between a key state and the next: outside the view, beyond the fog, or behind the moon's horizon. The file is about 37 MB. The jungle shots render at roughly 10 frames per second, so the editor plays them slower than real time; rendered to video, the film runs at full speed.
 
