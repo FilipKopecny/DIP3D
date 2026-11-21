@@ -179,15 +179,18 @@ internal sealed partial class Story
 
     private static readonly Flier[] Fliers =
     [
-        new(0.80f, 0.25f, 0, -4.5f, 4.5f, -0.5f, 2.4f, new(1.5f, 1.5f, 10f), new(-1.6f, 1.4f, 4.5f), -4.0f, 6.0f, -1.3f, -0.9f, 2.2f, 4.2f, 100, 2.6f, 1.9f),
-        new(0.90f, 0.75f, 1, -5.5f, 3.6f, 0.6f, 2.5f, new(2.8f, 0.9f, 11f), new(-0.2f, 0.9f, 5.5f), -4.8f, 5.0f, 0.6f, 1.1f, 2.3f, 4.8f, 125, 3.2f, 2.4f),
-        new(1.00f, 0.25f, 2, -6.5f, 6.0f, 0.1f, 2.4f, new(0.6f, 2.2f, 12f), new(-2.6f, 1.9f, 6.5f), -5.5f, 7.5f, 0.2f, 0.2f, 2.2f, 5.3f, 150, 2.7f, 2.1f),
-        new(0.75f, 0.75f, 3, -7.0f, 3.2f, 0.9f, 2.6f, new(3.2f, 1.8f, 9f), new(0.4f, 1.6f, 4.0f), -6.3f, 4.5f, 1.1f, -0.3f, 2.4f, 5.6f, 175, 3.3f, 2.5f),
-        new(0.70f, 0.25f, 4, -8.0f, 5.4f, -0.9f, 2.4f, new(-0.2f, 1.0f, 13f), new(-3.0f, 1.0f, 7.5f), -7.0f, 6.5f, -0.9f, 1.4f, 2.1f, 4.0f, 200, 2.8f, 1.8f),
+        new(0.80f, 0.25f, 0, -4.5f, 4.5f, -0.5f, 2.4f, new(1.5f, 1.5f, 10f), new(-1.6f, 1.4f, 4.5f), -4.0f, 6.0f, -1.3f, -0.9f, 2.2f, 4.2f, 140, 3.0f, 2.0f),
+        new(0.90f, 0.75f, 1, -5.5f, 3.6f, 0.6f, 2.5f, new(2.8f, 0.9f, 11f), new(-0.2f, 0.9f, 5.5f), -4.8f, 5.0f, 0.6f, 1.1f, 2.3f, 4.8f, 160, 3.6f, 2.6f),
+        new(1.00f, 0.25f, 2, -6.5f, 6.0f, 0.1f, 2.4f, new(0.6f, 2.2f, 12f), new(-2.6f, 1.9f, 6.5f), -5.5f, 7.5f, 0.2f, 0.2f, 2.2f, 5.3f, 180, 3.2f, 2.2f),
+        new(0.75f, 0.75f, 3, -7.0f, 3.2f, 0.9f, 2.6f, new(3.2f, 1.8f, 9f), new(0.4f, 1.6f, 4.0f), -6.3f, 4.5f, 1.1f, -0.3f, 2.4f, 5.6f, 200, 3.7f, 2.7f),
+        new(0.70f, 0.25f, 4, -8.0f, 5.4f, -0.9f, 2.4f, new(-0.2f, 1.0f, 13f), new(-3.0f, 1.0f, 7.5f), -7.0f, 6.5f, -0.9f, 1.4f, 2.1f, 4.0f, 220, 3.1f, 1.9f),
     ];
 
     /// <summary>At the shore the flock gathers round him: from the first time to the second.</summary>
     private const float GatherStart = 60f, GatherEnd = 63f;
+
+    /// <summary>How much higher than the straight way the mantas fly, halfway to the arc.</summary>
+    private const float GatherArc = 2.6f;
 
     private static float Gathered(float time) => Smooth(GatherStart, GatherEnd, time);
 
@@ -249,7 +252,11 @@ internal sealed partial class Story
         float dk = d + rel + 0.25f * Wave(time, 9f, f.Phase);
         var n = AstroPath.Beside(dk, side + 0.3f * Wave(time, 7f, f.Phase + 0.3f));
         var p = n * (Planet.SurfaceRadius(n) + height + 0.15f * Wave(time, 5f, f.Phase));
-        return time > GatherStart ? Lerp(p, RingPoint(f, time), Gathered(time)) : p;
+        if (time <= GatherStart) return p;
+        // on the way to the arc it passes high over him (and over the camera in the shallows), not at head height
+        float g = Gathered(time);
+        var q = Lerp(p, RingPoint(f, time), g);
+        return q + Vector3.Normalize(q) * GatherArc * MathF.Sin(MathF.PI * g);
     }
 
     /// <summary>
