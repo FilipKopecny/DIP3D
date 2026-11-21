@@ -119,12 +119,23 @@ internal sealed partial class SceneRenderer
         GL.BindVertexArray(0);
     }
 
+    /// <summary>
+    /// Values this close to "off" count as off. Interpolating between key states that all hold the
+    /// default gives e.g. a refractive index of 1.0000001, which must not turn a translucent element
+    /// (a sun's halo, a lamp's beam) into glass.
+    /// </summary>
+    private const float Negligible = 1e-3f;
+
+    private static bool IsReflective(Element m) => m.Reflectivity > Negligible;
+
+    private static bool IsGlass(Element m) => m.RefractiveIndex > 1f + Negligible && m.Diffuse.A < 0.999f;
+
     private void SetModernMaterial(DrawCommand cmd, bool ao, bool env)
     {
         var m = cmd.Material;
         _shader.Set("uGlow", m?.Glow ?? 1f);
-        _shader.Set("uReflect", m?.Reflectivity ?? 0f);
-        _shader.Set("uIor", m?.RefractiveIndex ?? 1f);
+        _shader.Set("uReflect", m != null && IsReflective(m) ? m.Reflectivity : 0f);
+        _shader.Set("uIor", m != null && IsGlass(m) ? m.RefractiveIndex : 1f);
         bool useEnv = env && cmd.Probe >= 0 && _modern != null;
         _shader.Set("uEnvOn", useEnv);
         if (useEnv)
@@ -172,6 +183,7 @@ internal sealed partial class SceneRenderer
             depth.Set("uProj", proj);
             depth.Set("uShadowLightPos", light.Position);
             depth.Set("uShadowLightFar", far);
+            float lightSize = FixtureRadius(light.Position);
 
             // a spot light only needs the faces its cone reaches
             bool spot = light.Light.SpotCutoff <= 90 && light.Direction.LengthSquared() > 1e-12f;
@@ -188,7 +200,7 @@ internal sealed partial class SceneRenderer
                 var fr = new Frustum(view * proj);
                 foreach (var cmd in _commands)
                 {
-                    if (!CastsShadow(cmd, light.Position, far) || !fr.Visible(cmd.Center, cmd.Radius)) continue;
+                    if (!CastsShadow(cmd, light.Position, far, lightSize) || !fr.Visible(cmd.Center, cmd.Radius)) continue;
                     DrawGeometry(depth, cmd);
                 }
             }
@@ -203,13 +215,36 @@ internal sealed partial class SceneRenderer
         return slots;
     }
 
-    private static bool CastsShadow(DrawCommand cmd, Vector3 light, float far)
+    /// <param name="lightSize">Radius of the light's glowing body (<see cref="FixtureRadius"/>), 0 for a point.</param>
+    private static bool CastsShadow(DrawCommand cmd, Vector3 light, float far, float lightSize)
     {
         if (cmd.Overlay || !cmd.Lit || !cmd.Filled || cmd.Material is not { CastsShadows: true } m) return false;
-        if (m.Diffuse.A < 0.5f || (m.RefractiveIndex > 1f && m.Diffuse.A < 0.999f)) return false; // glass and the nearly invisible
+        if (m.Diffuse.A < 0.5f || IsGlass(m)) return false; // glass and the nearly invisible
+        // An element less than half the size of the light has an umbra shorter than its distance
+        // from the light: next to a sun it would throw a huge hard shadow across the scene (the shadow
+        // map treats the light as a point), while a real light that big leaves only a faint penumbra.
+        if (cmd.Radius < 0.5f * lightSize) return false;
         float d = Vector3.Distance(cmd.Center, light);
         // an element enclosing the light (a lamp, a sun, a sky) does not shadow it
         return d >= cmd.Radius && d - cmd.Radius < far;
+    }
+
+    /// <summary>
+    /// The size of a light: the radius of the smallest glowing element centred on it (the sun sphere
+    /// around a sun's light, a bulb around a lamp's), or 0 when it has none and is a point.
+    /// </summary>
+    private float FixtureRadius(Vector3 light)
+    {
+        float best = 0;
+        foreach (var cmd in _commands)
+        {
+            if (cmd.Overlay || !cmd.Filled || cmd.Material is not { } m || cmd.Radius <= 0) continue;
+            var e = m.Emission;
+            if (MathF.Max(e.R, MathF.Max(e.G, e.B)) * m.Glow < 0.5f) continue;
+            if (Vector3.Distance(cmd.Center, light) > 0.5f * cmd.Radius) continue;
+            if (best == 0 || cmd.Radius < best) best = cmd.Radius;
+        }
+        return best;
     }
 
     /// <summary>How much a light matters for the picture: its brightness where the camera is.</summary>
@@ -257,7 +292,7 @@ internal sealed partial class SceneRenderer
     {
         foreach (var cmd in _commands) cmd.Probe = -1;
         var candidates = _commands.Where(c => !c.Overlay && c.Lit && c.Material is { } m
-                                              && (m.Reflectivity > 0 || (m.RefractiveIndex > 1 && m.Diffuse.A < 0.999f))
+                                              && (IsReflective(m) || IsGlass(m))
                                               && frustum.Visible(c.Center, c.Radius)).ToList();
         if (candidates.Count == 0 || _modern == null) return 0;
 
