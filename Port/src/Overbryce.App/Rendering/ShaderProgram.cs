@@ -168,6 +168,7 @@ internal static class SceneShader
 
         // ---- modern rendering
         uniform bool uModern;
+        uniform bool uClassicTextureLight;   // clamp the light under textures at 1, as OpenGL 1.1 did
         uniform float uGlow;
         uniform bool uUseAo;
         uniform sampler2D uAoTex;
@@ -343,7 +344,10 @@ internal static class SceneShader
                         lit = shadow(uShadowSlot[i], uLightPos[i], N);
                     c += att * spot * (uLightAmbient[i].rgb * uMatAmbient.rgb * ao + direct * lit * aoDirect);
                 }
-                color = vec4(uModern ? max(c, 0.0) : clamp(c, 0.0, 1.0), clamp(uMatDiffuse.a, 0.0, 1.0));
+                // the classic renderer clamps like OpenGL 1.1; the modern one keeps HDR, except under a
+                // texture with the classic texture lighting (scenes lit for the clamp)
+                bool clampLight = !uModern || (uClassicTextureLight && uTextured);
+                color = vec4(clampLight ? clamp(c, 0.0, 1.0) : max(c, 0.0), clamp(uMatDiffuse.a, 0.0, 1.0));
             }
             else
             {

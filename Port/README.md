@@ -26,7 +26,7 @@ The basic workflow:
 
 Next to the classic 1998 look there is now a modern renderer (View › Modern rendering, Ctrl+M) with:
 
-- HDR lighting with bloom;
+- HDR lighting with bloom (textures keep the 1998 clamp of the light at 1, so the old scenes are not washed out);
 - soft shadows from up to eight lights;
 - ambient occlusion;
 - reflections and refracting glass;

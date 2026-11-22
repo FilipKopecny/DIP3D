@@ -49,6 +49,7 @@ internal sealed partial class SceneRenderer
         UnbindModernTextures();
         _shader.Set("uPass", 0);
         _shader.Set("uModern", true);
+        _shader.Set("uClassicTextureLight", s.ClassicTextureLight);
         _shader.Set("uEnvOn", false);
         _shader.Set("uUseAo", false);
         _shader.Set("uGlobalAmbient", new Vector4(0.2f, 0.2f, 0.2f, 1f));

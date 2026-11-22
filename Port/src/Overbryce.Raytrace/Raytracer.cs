@@ -275,7 +275,10 @@ internal sealed class TraceContext
         float eps = Epsilon(p);
         float ao = 1;
         if (!_o.Classic && _rs.AmbientOcclusion) ao = Occlusion(p + ngView * eps, ngView);
-        var color = Light(inst, p, n, ng, v, Transform(sp.ShadowP, world), ao, eps) * new Vector3(tex.X, tex.Y, tex.Z);
+        var light = Light(inst, p, n, ng, v, Transform(sp.ShadowP, world), ao, eps);
+        // scenes lit for the clamp of OpenGL 1.1: a texture never gets brighter than itself
+        if (mat.Texture != null && _o.Modern.ClassicTextureLight) light = Vector3.Min(light, Vector3.One);
+        var color = light * new Vector3(tex.X, tex.Y, tex.Z);
         float coverage = Math.Clamp(mat.Alpha, 0f, 1f) * tex.W;
         float alpha = _o.AlphaBlend ? coverage : 1;
 

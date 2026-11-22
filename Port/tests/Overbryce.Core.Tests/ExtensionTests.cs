@@ -76,6 +76,19 @@ public class ExtensionTests
     }
 
     [Fact]
+    public void Classic_texture_lighting_is_on_for_old_files_and_off_round_trips()
+    {
+        // a file from 1998 (no extension block) gets the clamp of OpenGL 1.1
+        Assert.True(AniFile.Parse(AniFile.Serialize(Sample())).Modern.ClassicTextureLight);
+
+        var a = Sample();
+        a.Modern.ClassicTextureLight = false;
+        string text = AniFile.Serialize(a);
+        Assert.Contains("classicTextureLight=0", text);
+        Assert.False(AniFile.Parse(text).Modern.ClassicTextureLight);
+    }
+
+    [Fact]
     public void The_text_before_the_block_is_the_original_format()
     {
         // what the 1998 program and Overbryce 2.0 read: everything up to KoniecAnimacie

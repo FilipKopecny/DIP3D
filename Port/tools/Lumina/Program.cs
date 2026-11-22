@@ -36,6 +36,8 @@ Console.WriteLine($"Route: {Planet.BeachDistance:0.0} units to the beach, {Plane
 clock.Restart();
 Kit.ResetUnwrap();
 var animation = new Animation("Lumina") { Fps = 25 };
+// lit for the modern renderer: bright light may wash its textures out (HDR), unlike the scenes from 1998
+animation.Modern.ClassicTextureLight = false;
 animation.Scenes.Clear();
 foreach (float t in Intro.KeyTimes())
     animation.Scenes.Add(Intro.Build(t));

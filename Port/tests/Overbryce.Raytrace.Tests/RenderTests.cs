@@ -40,12 +40,12 @@ public class RenderTests
     }
 
     private static RaytraceImage Render(Scene scene, RaytraceSettings settings, bool classic = false, CameraSetup? camera = null,
-        Func<string, TextureImage?>? textures = null, int threads = 0, IReadOnlyList<FrameStep>? steps = null)
+        Func<string, TextureImage?>? textures = null, int threads = 0, IReadOnlyList<FrameStep>? steps = null, ModernSettings? modern = null)
     {
         var options = new RaytraceOptions
         {
             Settings = settings,
-            Modern = new ModernSettings { Bloom = false },
+            Modern = modern ?? new ModernSettings { Bloom = false },
             Classic = classic,
             Textures = textures ?? (_ => null),
             Threads = threads,
@@ -109,6 +109,28 @@ public class RenderTests
         var img = Render(With(ground, Lamp(0, 0, 5)), Settings(), classic: true);
         Assert.Equal(255, At(img, Size / 2, Size / 2).G);
         Assert.Equal(255, At(img, 2, 2).G);
+    }
+
+    [Fact]
+    public void Classic_texture_lighting_keeps_a_texture_from_getting_brighter_than_itself()
+    {
+        // a mid-grey texture under a lamp far above 1, as the scenes from 1998 set them
+        var texture = new TextureImage([128, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255], 2);
+        int Centre(float lampDiffuse, bool clamp)
+        {
+            var plate = Ground();
+            plate.Texture = "t";
+            var lamp = Lamp(0, 0, 5);
+            lamp.Diffuse = new Rgba(lampDiffuse, lampDiffuse, lampDiffuse, 1);
+            var img = Render(With(plate, lamp), Settings(shadows: false), textures: _ => texture,
+                modern: new ModernSettings { Bloom = false, ClassicTextureLight = clamp });
+            return At(img, Size / 2, Size / 2).G;
+        }
+
+        // clamped: a brighter lamp changes nothing once the light reaches 1
+        Assert.Equal(Centre(3, clamp: true), Centre(6, clamp: true));
+        // HDR: the bright light washes the texture out
+        Assert.True(Centre(6, clamp: false) > Centre(6, clamp: true) + 20);
     }
 
     [Fact]

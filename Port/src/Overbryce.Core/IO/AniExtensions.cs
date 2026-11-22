@@ -62,6 +62,7 @@ public static class AniExtensions
         BoolKey<ModernSettings>("reflections", s => s.Reflections, (s, v) => s.Reflections = v, true),
         IntKey<ModernSettings>("probes", s => s.ReflectionProbes, (s, v) => s.ReflectionProbes = v, 4),
         IntKey<ModernSettings>("probeSize", s => s.ProbeSize, (s, v) => s.ProbeSize = v, 256),
+        BoolKey<ModernSettings>("classicTextureLight", s => s.ClassicTextureLight, (s, v) => s.ClassicTextureLight = v, true),
     ];
 
     private static readonly Key<RaytraceSettings>[] RaytraceKeys =

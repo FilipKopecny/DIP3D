@@ -49,10 +49,23 @@ Every shape has a new category in the property grid, *9 Modern rendering*. The c
 |---|---|---|---|
 | General | Open in modern mode | off | Show the animation in modern mode when it is opened |
 | | Exposure | 1 | Brightness before the highlights are compressed. 1 matches the classic brightness |
+| | Classic texture lighting | on | The light on a textured surface is clamped at 1 before the texture is applied, as in the 1998 OpenGL. See below |
 | Bloom | On, Strength, Threshold | on, 0.5, 0.9 | Bright parts glow. The threshold is the brightness where the glow starts |
 | Shadows | On, Softness, Lights with shadows, Map size | on, 1, 8, 1024 | Soft shadow edge width; up to 8 lights; resolution of a shadow-map face (a distant light's focused map has twice that) |
 | Ambient occlusion | On, Radius, Strength | on, 0.5, 1 | Darker creases and contacts. Radius is in scene units |
 | Reflections | On, Probes, Probe size | on, 4, 256 | Reflections and glass. Probes is how many elements get their own view of the surroundings per frame |
+
+### Classic texture lighting
+
+OpenGL 1.1 clamped the summed lighting of a vertex to 1 and only then multiplied it by the texture (GL_MODULATE). So a texture could never get brighter than itself, however strong the lights were. The 1998 scenes rely on this: their lights are often set far above 1. In Mesto, the backdrop photo gets about 4 (emission, ambient, two strong lights and their specular). The classic renderer shows the photo as it is; without the clamp, the modern renderer and the ray tracer washed it out to white.
+
+*Classic texture lighting* (on by default, and for every file without the setting) restores the clamp for textured surfaces only:
+
+- untextured surfaces keep the HDR light, so highlights still bloom;
+- glow and the emission of light bodies are not affected;
+- shadows, occlusion and reflections are applied after the clamp, as before.
+
+Lumina was lit for the modern renderer and turns it off (`classicTextureLight=0`), so bright light can wash its textures out. Turn it off for a new scene that should behave the same way.
 
 ## How a frame is drawn
 
@@ -65,7 +78,7 @@ The code is in `src/Overbryce.App/Rendering`: `SceneRenderer.Modern.cs` and `Mod
 2. **Reflection probes.** The elements with reflectivity or glass that are largest on screen each get a cube map of their surroundings, drawn from their centre without themselves (up to *Probes*). Other reflecting elements use the nearest probe. The probes are drawn with lighting and shadows but without reflections, so there is one bounce.
 3. **Ambient occlusion.** Normals and depth of the opaque elements are drawn first. Screen-space ambient occlusion (16 samples in a hemisphere, 4×4 noise, blurred) darkens creases and contacts. It is applied fully to ambient light and at 40 % to direct light.
 4. **Main pass.** The scene is drawn into a 16-bit floating-point buffer with multisampling: 4 samples in the view, 8 for export, none when antialiasing is off in the rendering settings.
-   - The lighting is the classic one, with no clamp at 1.
+   - The lighting is the classic one, with no clamp at 1, except on textured surfaces while *Classic texture lighting* is on.
    - Then shadows, occlusion, glow, Schlick-Fresnel reflection and the refraction of glass are added.
 5. **Post-processing.** The image is resolved and a dual-filter bloom is applied (6 levels, soft threshold). Then exposure and a tone curve are applied. The curve is the identity up to 0.8 and rolls off to 1, so ordinary colours look as in the classic renderer and only the highlights are compressed.
 

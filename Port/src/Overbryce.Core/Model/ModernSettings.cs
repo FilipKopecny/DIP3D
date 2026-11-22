@@ -16,6 +16,9 @@ public sealed class ModernSettings
     [Category("1 General"), DisplayName("Exposure"), Description("Brightness of the whole picture before the highlights are compressed (1 = as in the classic renderer).")]
     public float Exposure { get; set; } = 1f;
 
+    [Category("1 General"), DisplayName("Classic texture lighting"), Description("Light on textured surfaces is clamped at 1 before the texture is applied, as in the 1998 OpenGL: a texture never gets brighter than itself. The scenes from 1998 need it, their lights are often set far above 1. Off lets bright light wash textures out (HDR). Also used by the ray tracer.")]
+    public bool ClassicTextureLight { get; set; } = true;
+
     [Category("2 Bloom"), DisplayName("On"), Description("Bright parts of the picture glow.")]
     public bool Bloom { get; set; } = true;
 
