@@ -65,7 +65,7 @@ Overbryce animates by key states with a spline between them, not by per-frame cu
 - **Fixed key states.** The first and last frame, every change of visibility, every camera cut, and both frames of a jump are always key states. A jump is an element that leaps from one frame to the next; its key states get *Stop at this state*, so the spline does not swing around it.
 - **Added key states.** The worst in-between frame of each segment is added while it strays more than the tolerance. Positions are compared against the tolerance times the scene's size, colours to within 0.01.
 
-The test scene below (96 frames) needs 39 key states.
+The test scene below (96 frames) needs 54 key states.
 
 ## Round trip: scenes exported by Overbryce
 
