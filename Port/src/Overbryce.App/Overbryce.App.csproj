@@ -4,16 +4,28 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
+    <!-- the editor is WPF; Windows Forms only hosts the OpenGL view (OpenTK's GLControl) -->
+    <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Overbryce</AssemblyName>
     <RootNamespace>Overbryce.App</RootNamespace>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>Overbryce Animator</Product>
-    <Version>2.2.0</Version>
+    <Version>2.3.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon></ApplicationIcon>
+    <!-- the DPI awareness is in app.manifest for WPF; Windows Forms would rather set it itself, but it only hosts the view -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF and Windows Forms share many type names (Application, Point, Color ...): no global usings for either -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <!-- WPF leaves System.IO out (its Path clashes with the Path shape); the editor uses only System.IO's -->
+    <Using Include="System.IO" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Overbryce.Core\Overbryce.Core.csproj" />
@@ -25,8 +37,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- original 25x25 tool button bitmaps from DIP/SOURCE/BITMAPS -->
-    <EmbeddedResource Include="Resources\Tools\*.bmp" LogicalName="Tools.%(Filename)%(Extension)" />
     <!-- written next to a Blender export; Blender runs it to build the .blend file -->
     <EmbeddedResource Include="Export\overbryce_blender.py" LogicalName="overbryce_blender.py" />
     <!-- the original sample animations and their textures ship next to the executable -->

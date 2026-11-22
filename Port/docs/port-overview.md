@@ -6,7 +6,7 @@ Overbryce Animator 1.0 was written in 1998 with Borland C++ Builder 3 and OpenGL
 
 1. **Analysis.** The 1998 C++ source (`DIP/SOURCE`), the sample animations (`DIP/SCENES`) and the thesis text were studied. This covered the scene model, the `.ani` format, the Catmull-Rom interpolation and its fix for unevenly spaced key states, and the rendering.
 2. **The model library** (`src/Overbryce.Core`). It holds the original element types, groups, key states and animation, with no user interface. It reads and writes the `.ani` format unchanged and interpolates the same way the thesis describes. The [animation model](animation-model.md) and the [file format](ani-format.md) are documented separately.
-3. **The editor** (`src/Overbryce.App`): WinForms and OpenGL 3.3.
+3. **The editor** (`src/Overbryce.App`): WPF (since 2.3; Windows Forms before) and OpenGL 3.3.
    - **Rendering:** a shader reproduces the OpenGL 1.1 fixed-function pipeline, with up to 8 lights, fog, transparent textures and the torus's sphere mapping. The shapes are built in code the way GLU built them.
    - **Editing:** the original tool-bar bitmaps, the element tree and a property grid.
    - **Playback and output:** a timeline with live preview and playback, and off-screen frame export.

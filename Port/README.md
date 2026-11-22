@@ -1,8 +1,8 @@
-# Overbryce Animator 2.2
+# Overbryce Animator 2.3
 
 This is a key-frame 3D animation editor for current Windows, built on .NET 10 and OpenGL 3.3. It is a port of **Overbryce Animator 1.0**, written in 1998 by Tomáš Kopečný for the diploma thesis *Simulácia virtuálnej reality pomocou OpenGL – animácia scény*. The thesis was submitted at FEI STU Bratislava; the original program was built with Borland C++ Builder 3 and OpenGL 1.1.
 
-![The editor with NewAni.ani open and an object selected by clicking it](docs/images/editor.png)
+![The editor with NewAni.ani open and an object selected](docs/images/editor.png)
 
 The basic workflow:
 
@@ -54,6 +54,19 @@ With its effects off, it renders the classic look within about one level in 255 
 |---|---|
 | ![Lumina at 54 s, modern](docs/images/lumina-54-modern.png) | ![Lumina at 54 s, ray traced](docs/images/lumina-54-raytraced.png) |
 
+### New in 2.3: a WPF editor
+
+The editor window moved from Windows Forms to WPF with the Windows 11 (Fluent) look:
+
+- light and dark themes, which follow Windows or can be chosen in View › Theme (the choice is kept in `%APPDATA%\Overbryce\settings.json`);
+- line icons for the element types and Windows icon-font symbols in place of the 1998 bitmap buttons, drawn in the theme's colours;
+- a property panel with collapsible categories, colour swatches with a colour picker, and the description of the setting under the pointer;
+- a tree that builds the branch of a key state when it is opened, so animations with hundreds of key states open quickly.
+
+The 3D view, the file format and the command line are unchanged.
+
+![The editor in the dark theme with Lumina open](docs/images/editor-dark.png)
+
 ## Features
 
 - **Elements:**
@@ -69,8 +82,9 @@ With its effects off, it renders the classic look within about one level in 255 
   - Permanent rotation and orbit.
   - Fog keyed per state.
 - **Editor:**
+  - Light and dark themes.
   - Element tree with drag-and-drop between groups and key states.
-  - Property grid.
+  - Property panel.
   - **Click selection in the 3D view.**
   - Orbitable front, side and top views.
   - Timeline with live preview and real-time playback.
@@ -89,7 +103,7 @@ With its effects off, it renders the classic look within about one level in 255 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - A GPU with OpenGL 3.3
 
-The project uses [OpenTK](https://opentk.net/) 4 and its WinForms `GLControl` (restored from NuGet).
+The project uses [OpenTK](https://opentk.net/) 4 and its WinForms `GLControl` (restored from NuGet), which the WPF window hosts for the 3D view.
 
 ## Build, run and test
 
@@ -200,7 +214,7 @@ More about selection and the other tools:
 |---|---|
 | `src/Overbryce.Core` | UI-free model: elements, groups, key states, the animation, interpolation, transforms, the `.ani` reader and writer, and the tessellation shared by the renderers |
 | `src/Overbryce.Raytrace` | The offline ray tracer: scene compiler, BVH, shapes, shading, sampling and post-processing; needs only `Overbryce.Core` |
-| `src/Overbryce.App` | WinForms editor, the OpenGL renderer (a shader that emulates the GL 1.1 fixed-function pipeline, and the modern passes), the ray-tracing preview, picking, and frame export |
+| `src/Overbryce.App` | WPF editor, the OpenGL renderer (a shader that emulates the GL 1.1 fixed-function pipeline, and the modern passes), the ray-tracing preview, picking, and frame export |
 | `tests/Overbryce.Core.Tests` | xUnit tests: loading all 7 original sample files and Lumina, save and reload with identical output, the extension block, interpolation and camera maths |
 | `tests/Overbryce.Raytrace.Tests` | xUnit tests: shape intersections, the BVH, the classic lighting, shadows, glass, textures, motion blur and depth of field |
 | `samples/Lumina` | The Lumina animation and its textures |

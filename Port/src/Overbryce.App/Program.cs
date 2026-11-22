@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Drawing.Design;
 using Overbryce.App.UI;
 using Overbryce.Core;
 
@@ -10,10 +9,8 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // Rgba lives in the UI-free core library; attach the WinForms editing support here.
-        TypeDescriptor.AddAttributes(typeof(Rgba),
-            new TypeConverterAttribute(typeof(RgbaConverter)),
-            new EditorAttribute(typeof(RgbaEditor), typeof(UITypeEditor)));
+        // Rgba lives in the UI-free core library; attach its text form ("R; G; B; A") for the property grid here.
+        TypeDescriptor.AddAttributes(typeof(Rgba), new TypeConverterAttribute(typeof(RgbaConverter)));
 
         // Overbryce.exe file.ani
         // Overbryce.exe file.ani --snapshot out.png [--time 12.5] [--view camera|front|side|top] [--wire] [--size 800x600] [--modern|--classic]
@@ -39,7 +36,8 @@ internal static class Program
             return;
         }
 
-        ApplicationConfiguration.Initialize();
+        var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
+        Theme.Initialize(app);
 
         SnapshotRequest? snapshot = null;
         int s = Array.IndexOf(args, "--snapshot");
@@ -61,7 +59,7 @@ internal static class Program
                 Num("--time"),
                 Enum.TryParse<Rendering.ViewMode>(Opt("--view") ?? "camera", true, out var mode) ? mode : Rendering.ViewMode.Camera,
                 args.Contains("--wire"),
-                new Size(int.Parse(size[0]), int.Parse(size[1])),
+                new System.Drawing.Size(int.Parse(size[0]), int.Parse(size[1])),
                 Frames: s < 0,
                 From: Num("--from"),
                 To: Num("--to"),
@@ -72,7 +70,7 @@ internal static class Program
                 Log: raytrace ? Console.WriteLine : null);
         }
 
-        Application.Run(new MainForm(file, snapshot));
+        app.Run(new MainWindow(file, snapshot));
     }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]

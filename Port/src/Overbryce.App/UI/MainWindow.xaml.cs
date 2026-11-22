@@ -1,22 +1,30 @@
-﻿using System.ComponentModel;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Numerics;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Forms.Integration;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using OpenTK.GLControl;
 using OpenTK.Windowing.Common;
 using Overbryce.App.Rendering;
 using Overbryce.Core.IO;
 using Overbryce.Core.Model;
+using Forms = System.Windows.Forms;
+using RenderOptions = Overbryce.App.Rendering.RenderOptions;
 
 namespace Overbryce.App.UI;
 
 /// <summary>
-/// Main window (original TAniMain): element tree + property grid on the left, OpenGL view with the
-/// move/rotate tool bar on the right, key-state timeline below.
+/// Main window (original TAniMain): element tree + properties on the left, OpenGL view with the
+/// move/rotate tools on the right, key-state timeline below. The layout is in MainWindow.xaml.
 /// </summary>
-internal sealed class MainForm : Form
+internal sealed partial class MainWindow : Window
 {
-    private const string AppTitle = "Overbryce Animator";
+    public const string AppTitle = "Overbryce Animator";
 
     // ------------------------------------------------------------------ document state
     private Animation _animation = Animation.CreateNew();
@@ -34,52 +42,40 @@ internal sealed class MainForm : Form
     private readonly RenderSettings _settings = new();
     private readonly Dictionary<string, string> _textureLookup = new(StringComparer.OrdinalIgnoreCase);
 
-    // ------------------------------------------------------------------ playback
-    private readonly System.Windows.Forms.Timer _playTimer = new() { Interval = 10 };
+    // ------------------------------------------------------------------ playback and export
+    private readonly DispatcherTimer _playTimer = new(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(10) };
     private readonly Stopwatch _playClock = new();
     private float _playStart;
+    private bool _exporting;
     private bool _exportCancel;
 
     // ------------------------------------------------------------------ controls
     private readonly GLControl _gl;
     private SceneRenderer? _renderer;
-    private readonly TreeView _tree = new();
-    private readonly PropertyGrid _grid = new();
-    private readonly ImageList _treeImages = new();
-    private readonly Dictionary<object, TreeNode> _nodes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, TreeViewItem> _nodes = new(ReferenceEqualityComparer.Instance);
     private bool _suppressTreeSelect;
+    private bool _settingTimeline;
+    private TreeViewItem? _renaming;
+    private readonly ContextMenu _meshMenu = new();
+    private RaytracePreviewWindow? _raytraced;
 
-    private readonly TrackBar _timeline = new();
-    private readonly Label _timeLabel = new();
-    private readonly Button _playButton = new();
-    private readonly CheckBox _loopCheck = new();
-    private readonly NumericUpDown _moveStep = new();
-    private readonly NumericUpDown _rotateStep = new();
+    /// <summary>Menu shortcuts, read from the menu items' InputGestureText.</summary>
+    private readonly List<(Key Key, ModifierKeys Modifiers, MenuItem Item)> _shortcuts = new();
 
-    private readonly ToolStripStatusLabel _stateStatus = new();
-    private readonly ToolStripStatusLabel _viewStatus = new();
-    private readonly ToolStripStatusLabel _selectionStatus = new();
-    private readonly ToolStripStatusLabel _warningStatus = new();
-
-    private ToolStripMenuItem _wireItem = null!;
-    private ToolStripMenuItem _modernItem = null!;
-    private readonly Dictionary<ViewMode, ToolStripMenuItem> _viewItems = new();
-    private readonly Dictionary<string, Image?> _toolImages = new(StringComparer.OrdinalIgnoreCase);
-
-    private Point _lastMouse;
-    private Point _downPoint;
+    // mouse in the view (pixels of the OpenGL control)
+    private System.Drawing.Point _lastMouse;
+    private System.Drawing.Point _downPoint;
     private bool _dragged;
     private bool _pressed;
 
-    public MainForm(string? fileToOpen, SnapshotRequest? snapshot = null)
-    {
-        _currentScene = _animation.Scenes[0];
+    // dragging in the tree
+    private Point _treeDragStart;
+    private TreeViewItem? _treeDragItem;
 
-        Text = AppTitle;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(1280, 800);
-        StartPosition = FormStartPosition.CenterScreen;
-        KeyPreview = true;
+    public MainWindow(string? fileToOpen, SnapshotRequest? snapshot = null)
+    {
+        InitializeComponent();
+        _currentScene = _animation.Scenes[0];
 
         _gl = new GLControl(new GLControlSettings
         {
@@ -90,8 +86,9 @@ internal sealed class MainForm : Form
             DepthBits = 24,
         })
         {
-            Dock = DockStyle.Fill,
+            Dock = Forms.DockStyle.Fill,
         };
+        ViewSlot.Child = new WindowsFormsHost { Child = _gl };
 
         BuildUi();
         _editor.Reset(ViewMode.Front);
@@ -101,8 +98,9 @@ internal sealed class MainForm : Form
         UpdateTimeline();
 
         _playTimer.Tick += (_, _) => PlayTick();
+        Theme.Changed += UpdateViewChecks;
 
-        Shown += (_, _) =>
+        ContentRendered += (_, _) =>
         {
             if (fileToOpen != null) OpenFile(fileToOpen);
             if (snapshot != null)
@@ -190,147 +188,67 @@ internal sealed class MainForm : Form
 
     // ==================================================================================== UI build
 
-    private Image? Tool(string name)
-    {
-        if (_toolImages.TryGetValue(name, out var cached)) return cached;
-        Image? result = null;
-        var asm = typeof(MainForm).Assembly;
-        string? res = asm.GetManifestResourceNames().FirstOrDefault(n => string.Equals(n, $"Tools.{name}.bmp", StringComparison.OrdinalIgnoreCase));
-        if (res != null)
-        {
-            using var s = asm.GetManifestResourceStream(res)!;
-            using var src = new Bitmap(s);
-            var bmp = src.Clone(new Rectangle(0, 0, src.Width, src.Height), PixelFormat.Format32bppArgb);
-            // C++ Builder speed-button glyphs use the bottom-left pixel as the transparent colour
-            bmp.MakeTransparent(bmp.GetPixel(0, bmp.Height - 1));
-            result = bmp;
-        }
-        _toolImages[name] = result;
-        return result;
-    }
-
     private void BuildUi()
     {
-        SuspendLayout();
-
-        // ---------------------------------------------------------------- menu
-        var menu = new MenuStrip();
-        var file = new ToolStripMenuItem("&File");
-        file.DropDownItems.Add(Item("&New", Keys.Control | Keys.N, (_, _) => NewAnimation()));
-        file.DropDownItems.Add(Item("&Open...", Keys.Control | Keys.O, (_, _) => OpenWithDialog()));
-        file.DropDownItems.Add(Item("&Save", Keys.Control | Keys.S, (_, _) => Save(false)));
-        file.DropDownItems.Add(Item("Save &As...", Keys.Control | Keys.Shift | Keys.S, (_, _) => Save(true)));
-        file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(Item("&Export frames...", Keys.Control | Keys.E, (_, _) => ExportFrames()));
-        file.DropDownItems.Add(Item("Rendering se&ttings...", Keys.None, (_, _) => { if (SettingsDialog.Show(this, _settings)) _gl.Invalidate(); }));
-        file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(Item("E&xit", Keys.Alt | Keys.F4, (_, _) => Close()));
-
-        var edit = new ToolStripMenuItem("&Edit");
-        var insert = new ToolStripMenuItem("&Insert");
-        foreach (var (label, img, factory) in InsertableElements())
-            insert.DropDownItems.Add(Item(label, Keys.None, (_, _) => InsertElement(factory()), Tool(img)));
-        insert.DropDownItems.Add(new ToolStripSeparator());
+        // ---------------------------------------------------------------- inserting elements
+        var treeInsert = new MenuItem { Header = "Insert" };
+        foreach (var (label, icon, factory) in InsertableElements())
+        {
+            InsertMenu.Items.Add(Item(label, icon, () => InsertElement(factory())));
+            treeInsert.Items.Add(Item(label, icon, () => InsertElement(factory())));
+            var button = new Button { Content = Icons.Shape(icon), ToolTip = "Insert " + label.ToLowerInvariant() };
+            button.SetResourceReference(StyleProperty, "ToolButton");
+            button.Click += (_, _) => InsertElement(factory());
+            InsertButtons.Children.Add(button);
+        }
+        InsertMenu.Items.Add(new Separator());
         for (int i = 1; i <= 4; i++)
         {
             int preset = i;
-            insert.DropDownItems.Add(Item($"Bezier mesh preset {i}", Keys.None,
-                (_, _) => InsertElement(new MeshElement("NovyMesh", MeshPresets.Get(preset), MeshPresets.Size, MeshPresets.Size)), Tool("mesh" + i)));
+            Element Mesh() => new MeshElement("NovyMesh", MeshPresets.Get(preset), MeshPresets.Size, MeshPresets.Size);
+            InsertMenu.Items.Add(Item($"Bezier mesh preset {i}", "Mesh", () => InsertElement(Mesh())));
+            _meshMenu.Items.Add(Item($"Preset {i}", "Mesh", () => InsertElement(Mesh())));
         }
-        edit.DropDownItems.Add(insert);
-        edit.DropDownItems.Add(Item("&Delete", Keys.Delete, (_, _) => DeleteSelected()));
-        edit.DropDownItems.Add(Item("Re&name", Keys.F2, (_, _) => _tree.SelectedNode?.BeginEdit()));
-        edit.DropDownItems.Add(Item("Set as active &camera", Keys.Control | Keys.K, (_, _) => SetActiveCamera()));
-        edit.DropDownItems.Add(new ToolStripSeparator());
-        edit.DropDownItems.Add(Item("D&uplicate key state", Keys.Control | Keys.D, (_, _) => DuplicateState()));
-        edit.DropDownItems.Add(Item("Delete key s&tate", Keys.Control | Keys.Delete, (_, _) => DeleteState()));
+        _meshMenu.Closed += (_, _) => MeshPresetsButton.IsChecked = false;
 
-        var view = new ToolStripMenuItem("&View");
-        _wireItem = Item("&Wire frame", Keys.Control | Keys.W, (_, _) => { _wireframe = !_wireframe; UpdateViewChecks(); _gl.Invalidate(); });
-        view.DropDownItems.Add(_wireItem);
-        _modernItem = Item("&Modern rendering", Keys.Control | Keys.M, (_, _) => { _modernView = !_modernView; UpdateViewChecks(); UpdateStatus(); _gl.Invalidate(); });
-        view.DropDownItems.Add(_modernItem);
-        view.DropDownItems.Add(Item("&Ray trace this view", Keys.F9, (_, _) => RaytraceView()));
-        view.DropDownItems.Add(new ToolStripSeparator());
-        AddViewItem(view, "&Camera", ViewMode.Camera, Keys.Control | Keys.D1);
-        AddViewItem(view, "&Front", ViewMode.Front, Keys.Control | Keys.D2);
-        AddViewItem(view, "&Side", ViewMode.Side, Keys.Control | Keys.D3);
-        AddViewItem(view, "&Top", ViewMode.Top, Keys.Control | Keys.D4);
-        view.DropDownItems.Add(new ToolStripSeparator());
-        view.DropDownItems.Add(Item("F&irst key state", Keys.Control | Keys.Home, (_, _) => GoToState(0)));
-        view.DropDownItems.Add(Item("&Previous key state", Keys.PageUp, (_, _) => StepState(-1)));
-        view.DropDownItems.Add(Item("&Next key state (new at end)", Keys.PageDown, (_, _) => StepState(+1)));
-        view.DropDownItems.Add(Item("&Last key state", Keys.Control | Keys.End, (_, _) => GoToState(_animation.Scenes.Count - 1)));
-
-        var anim = new ToolStripMenuItem("&Animation");
-        anim.DropDownItems.Add(Item("&Settings...", Keys.None, (_, _) => EditAnimationSettings()));
-        anim.DropDownItems.Add(Item("&Modern rendering settings...", Keys.None, (_, _) => EditModernSettings()));
-        anim.DropDownItems.Add(Item("&Ray tracing settings...", Keys.None, (_, _) =>
+        // ---------------------------------------------------------------- tree
+        var treeMenu = new ContextMenu();
+        treeMenu.Items.Add(treeInsert);
+        treeMenu.Items.Add(Item("Rename", null, BeginRename, Icons.Rename));
+        treeMenu.Items.Add(Item("Delete", null, DeleteSelected, Icons.Delete));
+        treeMenu.Items.Add(Item("Set as active camera", null, SetActiveCamera, Icons.Camera));
+        treeMenu.Items.Add(new Separator());
+        treeMenu.Items.Add(Item("Duplicate key state", null, DuplicateState, Icons.Copy));
+        treeMenu.Items.Add(Item("Delete key state", null, DeleteState));
+        Tree.ContextMenu = treeMenu;
+        Tree.SelectedItemChanged += (_, _) => Tree_AfterSelect();
+        Tree.PreviewMouseRightButtonDown += (_, e) =>
         {
-            if (RaytraceSettingsDialog.Show(this, _animation.Raytrace)) MarkDirty();
-        }));
-        anim.DropDownItems.Add(Item("&Play / Stop", Keys.F5, (_, _) => TogglePlay(), Tool("render")));
-        anim.DropDownItems.Add(Item("&Compute frames (export)...", Keys.None, (_, _) => ExportFrames()));
-
-        var help = new ToolStripMenuItem("&Help");
-        help.DropDownItems.Add(Item("&Controls", Keys.F1, (_, _) => ShowHelp()));
-        help.DropDownItems.Add(Item("&About", Keys.None, (_, _) => AboutDialog.Show(this)));
-
-        menu.Items.AddRange([file, edit, view, anim, help]);
-
-        // ---------------------------------------------------------------- tool bar (original speed buttons)
-        var tools = new ToolStrip { ImageScalingSize = new Size(25, 25), GripStyle = ToolStripGripStyle.Hidden };
-        foreach (var (label, img, factory) in InsertableElements())
-            tools.Items.Add(ToolButton(label, img, () => InsertElement(factory())));
-        tools.Items.Add(new ToolStripSeparator());
-        var meshes = new ToolStripDropDownButton("Mesh presets", Tool("mesh")) { DisplayStyle = ToolStripItemDisplayStyle.Image, ToolTipText = "Insert Bezier mesh preset" };
-        for (int i = 1; i <= 4; i++)
+            if (ItemAt(e.OriginalSource) is { } item)
+            {
+                item.IsSelected = true;
+                item.Focus();
+            }
+        };
+        Tree.PreviewMouseLeftButtonDown += (_, e) =>
         {
-            int preset = i;
-            meshes.DropDownItems.Add(new ToolStripMenuItem($"Preset {i}", Tool("mesh" + i),
-                (_, _) => InsertElement(new MeshElement("NovyMesh", MeshPresets.Get(preset), MeshPresets.Size, MeshPresets.Size)))
-            { ImageScaling = ToolStripItemImageScaling.None });
-        }
-        tools.Items.Add(meshes);
-        tools.Items.Add(new ToolStripSeparator());
-        tools.Items.Add(ToolButton("Play / stop animation (F5)", "render", TogglePlay));
+            _treeDragStart = e.GetPosition(Tree);
+            _treeDragItem = ItemAt(e.OriginalSource);
+        };
+        Tree.PreviewMouseMove += Tree_PreviewMouseMove;
+        Tree.DragOver += Tree_DragOver;
+        Tree.Drop += Tree_Drop;
 
-        // ---------------------------------------------------------------- left side: tree + properties
-        _treeImages.ColorDepth = ColorDepth.Depth32Bit;
-        _treeImages.ImageSize = new Size(LogicalToDeviceUnits(18), LogicalToDeviceUnits(18));
-        foreach (var (key, img) in TreeIcons())
-            if (Tool(img) is { } image) _treeImages.Images.Add(key, image);
+        // ---------------------------------------------------------------- properties
+        Properties.PropertyValueChanged += Grid_PropertyValueChanged;
 
-        _tree.Dock = DockStyle.Fill;
-        _tree.HideSelection = false;
-        _tree.LabelEdit = true;
-        _tree.AllowDrop = true;
-        _tree.ImageList = _treeImages;
-        _tree.AfterSelect += Tree_AfterSelect;
-        _tree.BeforeLabelEdit += (_, e) => { if (e.Node?.Tag == null) e.CancelEdit = true; };
-        _tree.AfterLabelEdit += Tree_AfterLabelEdit;
-        _tree.ItemDrag += (_, e) => { if (e.Item is TreeNode { Tag: Element and not Scene } n) _tree.DoDragDrop(n, DragDropEffects.Move | DragDropEffects.Copy); };
-        _tree.DragOver += Tree_DragOver;
-        _tree.DragDrop += Tree_DragDrop;
-        _tree.NodeMouseClick += (_, e) => { if (e.Button == MouseButtons.Right) _tree.SelectedNode = e.Node; };
-        _tree.ContextMenuStrip = BuildTreeMenu();
-
-        _grid.Dock = DockStyle.Fill;
-        _grid.ToolbarVisible = false;
-        _grid.PropertySort = PropertySort.Categorized;
-        _grid.PropertyValueChanged += Grid_PropertyValueChanged;
-
-        var leftSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
-        leftSplit.Panel1.Controls.Add(_tree);
-        leftSplit.Panel2.Controls.Add(_grid);
-
-        // ---------------------------------------------------------------- right side: view + tools + timeline
+        // ---------------------------------------------------------------- view
         _gl.Paint += (_, _) => RenderView();
         _gl.Resize += (_, _) => _gl.Invalidate();
         _gl.MouseDown += (_, e) =>
         {
             _lastMouse = _downPoint = e.Location;
-            _pressed = e.Button == MouseButtons.Left;
+            _pressed = e.Button == Forms.MouseButtons.Left;
             _dragged = false;
             _gl.Focus();
         };
@@ -338,8 +256,8 @@ internal sealed class MainForm : Form
         _gl.MouseUp += (_, e) =>
         {
             // a click that only activated the window may arrive without its MouseDown: still pick
-            if (e.Button == MouseButtons.Left && !(_pressed && _dragged))
-                PickAt(e.Location, (ModifierKeys & Keys.Alt) != 0);
+            if (e.Button == Forms.MouseButtons.Left && !(_pressed && _dragged))
+                PickAt(e.Location, (Forms.Control.ModifierKeys & Forms.Keys.Alt) != 0);
             _pressed = _dragged = false;
         };
         _gl.MouseWheel += (_, e) =>
@@ -348,195 +266,206 @@ internal sealed class MainForm : Form
             _editor.Zoom(e.Delta > 0 ? 1 / 1.1f : 1.1f);
             _gl.Invalidate();
         };
+        // keys pressed while the view has the focus reach the window's PreviewKeyDown through the host
 
-        var right = new Panel { Dock = DockStyle.Fill };
-        right.Controls.Add(_gl);
-        right.Controls.Add(BuildToolPanel());
-        right.Controls.Add(BuildTimeline());
-
-        var mainSplit = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel1 };
-        mainSplit.Panel1.Controls.Add(leftSplit);
-        mainSplit.Panel2.Controls.Add(right);
-
-        // ---------------------------------------------------------------- status bar
-        var status = new StatusStrip();
-        _stateStatus.BorderSides = ToolStripStatusLabelBorderSides.Right;
-        _viewStatus.BorderSides = ToolStripStatusLabelBorderSides.Right;
-        _selectionStatus.BorderSides = ToolStripStatusLabelBorderSides.Right;
-        _warningStatus.Spring = true;
-        _warningStatus.TextAlign = ContentAlignment.MiddleLeft;
-        _warningStatus.ForeColor = Color.DarkRed;
-        status.Items.AddRange([_stateStatus, _viewStatus, _selectionStatus, _warningStatus]);
-
-        Controls.Add(mainSplit);
-        Controls.Add(tools);
-        Controls.Add(menu);
-        Controls.Add(status);
-        MainMenuStrip = menu;
-
-        ResumeLayout(true);
-
-        Load += (_, _) =>
+        // ---------------------------------------------------------------- tools and timeline
+        foreach (var (axis, name) in new[] { (0, 'X'), (1, 'Y'), (2, 'Z') })
         {
-            mainSplit.SplitterDistance = LogicalToDeviceUnits(330);
-            leftSplit.SplitterDistance = leftSplit.Height * 2 / 5;
-        };
-    }
-
-    private static ToolStripMenuItem Item(string text, Keys keys, EventHandler onClick, Image? image = null)
-    {
-        var item = new ToolStripMenuItem(text, image, onClick);
-        if (keys != Keys.None)
-        {
-            if (keys == Keys.Delete || keys == Keys.F2 || keys == Keys.PageUp || keys == Keys.PageDown)
-                item.ShortcutKeyDisplayString = keys switch { Keys.Delete => "Del", Keys.PageUp => "PgUp", Keys.PageDown => "PgDn", _ => keys.ToString() };
-            else
-                item.ShortcutKeys = keys;
+            foreach (int sign in new[] { 1, -1 })
+            {
+                var button = new Button
+                {
+                    Content = Icons.Rotation(name, sign > 0),
+                    ToolTip = $"Rotate about {name} ({(sign > 0 ? "counter-clockwise" : "clockwise")})",
+                };
+                button.SetResourceReference(StyleProperty, "ToolButton");
+                button.Click += (_, _) => RotateSelected(axis, sign);
+                RotateButtons.Children.Add(button);
+            }
         }
-        return item;
-    }
-
-    private ToolStripButton ToolButton(string text, string image, Action onClick)
-    {
-        var b = new ToolStripButton(text, Tool(image), (_, _) => onClick())
+        Timeline.ValueChanged += (_, _) =>
         {
-            DisplayStyle = Tool(image) != null ? ToolStripItemDisplayStyle.Image : ToolStripItemDisplayStyle.Text,
-            ToolTipText = text,
-        };
-        return b;
-    }
-
-    private void AddViewItem(ToolStripMenuItem menu, string text, ViewMode mode, Keys keys)
-    {
-        var item = Item(text, keys, (_, _) => SetViewMode(mode));
-        _viewItems[mode] = item;
-        menu.DropDownItems.Add(item);
-    }
-
-    private static IEnumerable<(string Label, string Image, Func<Element> Factory)> InsertableElements() =>
-    [
-        ("Sphere", "gula", () => new SphereElement()),
-        ("Disk", "disk", () => new DiskElement()),
-        ("Truncated cone", "zrezkuze", () => new ConeElement()),
-        ("Bezier mesh", "mesh", () => new MeshElement()),
-        ("Box", "kvader", () => new BoxElement()),
-        ("Rectangle", "obdlznik", () => new RectangleElement()),
-        ("Triangle", "trojuhol", () => new TriangleElement()),
-        ("Torus", "torus", () => new TorusElement()),
-        ("Light", "svetlo", () => new LightElement()),
-        ("Camera", "kamera", () => new CameraElement()),
-        ("Group", "grupa", () => new GroupElement()),
-    ];
-
-    private static IEnumerable<(string Key, string Image)> TreeIcons() =>
-    [
-        (nameof(ElementType.Sphere), "gula"), (nameof(ElementType.Disk), "disk"), (nameof(ElementType.Cone), "zrezkuze"),
-        (nameof(ElementType.Mesh), "mesh"), (nameof(ElementType.Box), "kvader"), (nameof(ElementType.Rectangle), "obdlznik"),
-        (nameof(ElementType.Triangle), "trojuhol"), (nameof(ElementType.Torus), "torus"), (nameof(ElementType.Light), "svetlo"),
-        (nameof(ElementType.Camera), "kamera"), (nameof(ElementType.Group), "grupa"), (nameof(ElementType.Scene), "render"),
-        ("Animation", "render"),
-    ];
-
-    private ContextMenuStrip BuildTreeMenu()
-    {
-        var m = new ContextMenuStrip();
-        var insert = new ToolStripMenuItem("Insert");
-        foreach (var (label, img, factory) in InsertableElements())
-            insert.DropDownItems.Add(Item(label, Keys.None, (_, _) => InsertElement(factory()), Tool(img)));
-        m.Items.Add(insert);
-        m.Items.Add(Item("Rename", Keys.None, (_, _) => _tree.SelectedNode?.BeginEdit()));
-        m.Items.Add(Item("Delete", Keys.None, (_, _) => DeleteSelected()));
-        m.Items.Add(Item("Set as active camera", Keys.None, (_, _) => SetActiveCamera()));
-        m.Items.Add(new ToolStripSeparator());
-        m.Items.Add(Item("Duplicate key state", Keys.None, (_, _) => DuplicateState()));
-        m.Items.Add(Item("Delete key state", Keys.None, (_, _) => DeleteState()));
-        return m;
-    }
-
-    /// <summary>The original move/rotate speed buttons (left/right/up/down/z, xcw/xccw ...).</summary>
-    private Control BuildToolPanel()
-    {
-        var strip = new ToolStrip
-        {
-            Dock = DockStyle.Right,
-            LayoutStyle = ToolStripLayoutStyle.VerticalStackWithOverflow,
-            ImageScalingSize = new Size(25, 25),
-            GripStyle = ToolStripGripStyle.Hidden,
-        };
-
-        strip.Items.Add(new ToolStripLabel("Move"));
-        _moveStep.DecimalPlaces = 2;
-        _moveStep.Increment = 0.1m;
-        _moveStep.Minimum = 0.01m;
-        _moveStep.Maximum = 100;
-        _moveStep.Value = 1;
-        _moveStep.Width = LogicalToDeviceUnits(60);
-        strip.Items.Add(new ToolStripControlHost(_moveStep) { ToolTipText = "Move step" });
-        strip.Items.Add(ToolButton("Move -X", "left", () => MoveSelected(-1, 0, 0)));
-        strip.Items.Add(ToolButton("Move +X", "right", () => MoveSelected(1, 0, 0)));
-        strip.Items.Add(ToolButton("Move +Y", "up", () => MoveSelected(0, 1, 0)));
-        strip.Items.Add(ToolButton("Move -Y", "down", () => MoveSelected(0, -1, 0)));
-        strip.Items.Add(ToolButton("Move +Z (towards the viewer)", "zksebe", () => MoveSelected(0, 0, 1)));
-        strip.Items.Add(ToolButton("Move -Z (away from the viewer)", "zodseba", () => MoveSelected(0, 0, -1)));
-        strip.Items.Add(new ToolStripSeparator());
-
-        strip.Items.Add(new ToolStripLabel("Rotate"));
-        _rotateStep.DecimalPlaces = 1;
-        _rotateStep.Minimum = 0.1m;
-        _rotateStep.Maximum = 180;
-        _rotateStep.Value = 15;
-        _rotateStep.Width = LogicalToDeviceUnits(60);
-        strip.Items.Add(new ToolStripControlHost(_rotateStep) { ToolTipText = "Rotation step in degrees" });
-        strip.Items.Add(ToolButton("Rotate about X (counter-clockwise)", "xccw", () => RotateSelected(0, 1)));
-        strip.Items.Add(ToolButton("Rotate about X (clockwise)", "xcw", () => RotateSelected(0, -1)));
-        strip.Items.Add(ToolButton("Rotate about Y (counter-clockwise)", "yccw", () => RotateSelected(1, 1)));
-        strip.Items.Add(ToolButton("Rotate about Y (clockwise)", "ycw", () => RotateSelected(1, -1)));
-        strip.Items.Add(ToolButton("Rotate about Z (counter-clockwise)", "zccw", () => RotateSelected(2, 1)));
-        strip.Items.Add(ToolButton("Rotate about Z (clockwise)", "zcw", () => RotateSelected(2, -1)));
-        strip.Items.Add(new ToolStripSeparator());
-
-        strip.Items.Add(new ToolStripLabel("Size"));
-        strip.Items.Add(new ToolStripButton("Grow", null, (_, _) => ResizeSelected(1.1f)) { ToolTipText = "Enlarge by 10 %" });
-        strip.Items.Add(new ToolStripButton("Shrink", null, (_, _) => ResizeSelected(1 / 1.1f)) { ToolTipText = "Shrink by 10 %" });
-        return strip;
-    }
-
-    private Control BuildTimeline()
-    {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Bottom, ColumnCount = 4, RowCount = 1, AutoSize = true, Padding = new Padding(4) };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        _playButton.Text = "Play";
-        _playButton.AutoSize = true;
-        _playButton.Click += (_, _) => TogglePlay();
-        _loopCheck.Text = "Loop";
-        _loopCheck.AutoSize = true;
-        _loopCheck.Anchor = AnchorStyles.Left;
-        _timeline.Minimum = 0;
-        _timeline.Maximum = 1000;
-        _timeline.TickStyle = TickStyle.None;
-        _timeline.Dock = DockStyle.Fill;
-        _timeline.Scroll += (_, _) =>
-        {
+            if (_settingTimeline) return;
             StopPlay();
-            _previewTime = TimelineToTime(_timeline.Value);
+            _previewTime = TimelineToTime(Timeline.Value);
             UpdateTimeLabel();
             UpdateStatus();
             _gl.Invalidate();
         };
-        _timeLabel.AutoSize = true;
-        _timeLabel.Anchor = AnchorStyles.Left;
-        _timeLabel.MinimumSize = new Size(LogicalToDeviceUnits(190), 0);
 
-        panel.Controls.Add(_playButton, 0, 0);
-        panel.Controls.Add(_loopCheck, 1, 0);
-        panel.Controls.Add(_timeline, 2, 0);
-        panel.Controls.Add(_timeLabel, 3, 0);
-        return panel;
+        CollectShortcuts(MainMenu);
+        PreviewKeyDown += (_, e) =>
+        {
+            if (_exporting)
+            {
+                if (e.Key == Key.Escape) _exportCancel = true;
+                e.Handled = true;
+                return;
+            }
+            if (HandleShortcut(e.Key == Key.System ? e.SystemKey : e.Key, Keyboard.Modifiers)) e.Handled = true;
+        };
     }
+
+    private static MenuItem Item(string header, string? shape, Action onClick, string? glyph = null)
+    {
+        var item = new MenuItem
+        {
+            Header = header,
+            Icon = shape != null ? Icons.Shape(shape) : glyph != null ? Icons.MenuGlyph(glyph) : null,
+        };
+        item.Click += (_, _) => onClick();
+        return item;
+    }
+
+    private static IEnumerable<(string Label, string Icon, Func<Element> Factory)> InsertableElements() =>
+    [
+        ("Sphere", "Sphere", () => new SphereElement()),
+        ("Disk", "Disk", () => new DiskElement()),
+        ("Truncated cone", "Cone", () => new ConeElement()),
+        ("Bezier mesh", "Mesh", () => new MeshElement()),
+        ("Box", "Box", () => new BoxElement()),
+        ("Rectangle", "Rectangle", () => new RectangleElement()),
+        ("Triangle", "Triangle", () => new TriangleElement()),
+        ("Torus", "Torus", () => new TorusElement()),
+        ("Light", "Light", () => new LightElement()),
+        ("Camera", "Camera", () => new CameraElement()),
+        ("Group", "Group", () => new GroupElement()),
+    ];
+
+    // ==================================================================================== shortcuts
+
+    private void CollectShortcuts(ItemsControl menu)
+    {
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            // Alt+F4 is the window's own
+            if (!string.IsNullOrEmpty(item.InputGestureText) && item.InputGestureText != "Alt+F4" && ParseGesture(item.InputGestureText) is { } g)
+                _shortcuts.Add((g.Key, g.Modifiers, item));
+            CollectShortcuts(item);
+        }
+    }
+
+    private static (Key Key, ModifierKeys Modifiers)? ParseGesture(string text)
+    {
+        var modifiers = ModifierKeys.None;
+        var key = Key.None;
+        foreach (string part in text.Split('+'))
+        {
+            switch (part)
+            {
+                case "Ctrl": modifiers |= ModifierKeys.Control; break;
+                case "Shift": modifiers |= ModifierKeys.Shift; break;
+                case "Alt": modifiers |= ModifierKeys.Alt; break;
+                case "Del": key = Key.Delete; break;
+                case "PgUp": key = Key.PageUp; break;
+                case "PgDn": key = Key.PageDown; break;
+                case [>= '0' and <= '9']: key = Key.D0 + (part[0] - '0'); break;
+                default:
+                    if (!Enum.TryParse(part, ignoreCase: true, out key)) return null;
+                    break;
+            }
+        }
+        return key == Key.None ? null : (key, modifiers);
+    }
+
+    /// <summary>Runs the menu item of the shortcut; keys that edit text stay with a text field that has the focus.</summary>
+    private bool HandleShortcut(Key key, ModifierKeys modifiers)
+    {
+        foreach (var (k, m, item) in _shortcuts)
+        {
+            if (k != key || m != modifiers) continue;
+            if ((key is Key.Delete or Key.F2 or Key.PageUp or Key.PageDown or Key.Home or Key.End) && IsEditingText()) return false;
+            if (!item.IsEnabled) return false;
+            item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, item));
+            return true;
+        }
+        return false;
+    }
+
+    private bool IsEditingText() =>
+        _renaming != null || Properties.IsKeyboardFocusWithin || Keyboard.FocusedElement is TextBoxBase or ComboBox or ComboBoxItem;
+
+    // ==================================================================================== menu and tool bar
+
+    private void New_Click(object sender, RoutedEventArgs e) => NewAnimation();
+    private void Open_Click(object sender, RoutedEventArgs e) => OpenWithDialog();
+    private void Save_Click(object sender, RoutedEventArgs e) => Save(false);
+    private void SaveAs_Click(object sender, RoutedEventArgs e) => Save(true);
+    private void Export_Click(object sender, RoutedEventArgs e) => ExportFrames();
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void RenderSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsDialog.Show(this, _settings)) _gl.Invalidate();
+    }
+
+    private void Delete_Click(object sender, RoutedEventArgs e) => DeleteSelected();
+    private void Rename_Click(object sender, RoutedEventArgs e) => BeginRename();
+    private void ActiveCamera_Click(object sender, RoutedEventArgs e) => SetActiveCamera();
+    private void DuplicateState_Click(object sender, RoutedEventArgs e) => DuplicateState();
+    private void DeleteState_Click(object sender, RoutedEventArgs e) => DeleteState();
+
+    private void Wire_Click(object sender, RoutedEventArgs e)
+    {
+        _wireframe = !_wireframe;
+        UpdateViewChecks();
+        UpdateStatus();
+        _gl.Invalidate();
+    }
+
+    private void Modern_Click(object sender, RoutedEventArgs e)
+    {
+        _modernView = !_modernView;
+        UpdateViewChecks();
+        UpdateStatus();
+        _gl.Invalidate();
+    }
+
+    private void RayTrace_Click(object sender, RoutedEventArgs e) => RaytraceView();
+
+    private void ViewMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string mode }) SetViewMode(Enum.Parse<ViewMode>(mode));
+        UpdateViewChecks(); // a tool bar toggle must not switch itself off
+    }
+
+    private void FirstState_Click(object sender, RoutedEventArgs e) => GoToState(0);
+    private void PreviousState_Click(object sender, RoutedEventArgs e) => StepState(-1);
+    private void NextState_Click(object sender, RoutedEventArgs e) => StepState(+1);
+    private void LastState_Click(object sender, RoutedEventArgs e) => GoToState(_animation.Scenes.Count - 1);
+
+    private void Theme_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string choice }) Theme.Set(Enum.Parse<ThemeChoice>(choice));
+    }
+
+    private void AnimationSettings_Click(object sender, RoutedEventArgs e) => EditAnimationSettings();
+    private void ModernSettings_Click(object sender, RoutedEventArgs e) => EditModernSettings();
+
+    private void RaytraceSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (RaytraceSettingsDialog.Show(this, _animation.Raytrace)) MarkDirty();
+    }
+
+    private void Play_Click(object sender, RoutedEventArgs e) => TogglePlay();
+    private void Help_Click(object sender, RoutedEventArgs e) => ShowHelp();
+    private void About_Click(object sender, RoutedEventArgs e) => AboutDialog.Show(this);
+
+    private void MeshPresets_Click(object sender, RoutedEventArgs e)
+    {
+        _meshMenu.PlacementTarget = MeshPresetsButton;
+        _meshMenu.Placement = PlacementMode.Bottom;
+        _meshMenu.IsOpen = true;
+    }
+
+    private void Move_Click(object sender, RoutedEventArgs e)
+    {
+        var d = ((string)((FrameworkElement)sender).Tag).Split(' ').Select(int.Parse).ToArray();
+        MoveSelected(d[0], d[1], d[2]);
+    }
+
+    private void Resize_Click(object sender, RoutedEventArgs e) =>
+        ResizeSelected(float.Parse((string)((FrameworkElement)sender).Tag, System.Globalization.CultureInfo.InvariantCulture));
 
     // ==================================================================================== rendering
 
@@ -569,11 +498,11 @@ internal sealed class MainForm : Form
                 string tex = "Texture not found: " + string.Join(", ", missing.Take(3).Select(Path.GetFileName));
                 warning = warning == null ? tex : warning + "  " + tex;
             }
-            _warningStatus.Text = warning ?? "";
+            if (!_exporting) WarningStatus.Text = warning ?? "";
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _warningStatus.Text = "Rendering failed: " + ex.Message;
+            WarningStatus.Text = "Rendering failed: " + ex.Message;
         }
     }
 
@@ -602,10 +531,10 @@ internal sealed class MainForm : Form
 
     // ==================================================================================== mouse
 
-    private void Gl_MouseMove(object? sender, MouseEventArgs e)
+    private void Gl_MouseMove(object? sender, Forms.MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left || !_pressed) return;
-        int slop = SystemInformation.DragSize.Width / 2;
+        if (e.Button != Forms.MouseButtons.Left || !_pressed) return;
+        int slop = Forms.SystemInformation.DragSize.Width / 2;
         if (!_dragged && Math.Abs(e.X - _downPoint.X) <= slop && Math.Abs(e.Y - _downPoint.Y) <= slop) return;
         _dragged = true;
         if (_viewMode == ViewMode.Camera) return;
@@ -620,7 +549,7 @@ internal sealed class MainForm : Form
     /// select in the Object List). Alt+click selects the enclosing group, repeated Alt+clicks go
     /// further up. Clicking the background selects the key state itself.
     /// </summary>
-    private void PickAt(Point location, bool selectGroup)
+    private void PickAt(System.Drawing.Point location, bool selectGroup)
     {
         if (_renderer == null) return;
         Element? hit;
@@ -638,7 +567,7 @@ internal sealed class MainForm : Form
                 View = view,
                 Projection = proj,
                 ResolveTexture = ResolveTexture,
-            }, w, h, location.X, location.Y, LogicalToDeviceUnits(4));
+            }, w, h, location.X, location.Y, _gl.LogicalToDeviceUnits(4));
 
             // while previewing, the picture is an in-between copy of the key state the interval
             // starts at: select the same element (by name path) in that key state
@@ -650,7 +579,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _warningStatus.Text = "Picking failed: " + ex.Message;
+            WarningStatus.Text = "Picking failed: " + ex.Message;
             return;
         }
         finally
@@ -666,11 +595,7 @@ internal sealed class MainForm : Form
             target = start.Parent is { } parent and not Scene ? parent : start;
         }
 
-        if (_nodes.TryGetValue(target, out var node))
-        {
-            _tree.SelectedNode = node;
-            node.EnsureVisible();
-        }
+        if (TryGetNode(target, out var node)) SelectNode(node);
     }
 
     /// <summary>The element of <paramref name="scene"/> at the same name path as <paramref name="element"/> (from another copy of the state).</summary>
@@ -704,58 +629,134 @@ internal sealed class MainForm : Form
         _ => o.ToString() ?? "",
     };
 
-    private static string ImageKey(object o) => o switch
+    private static string IconName(object o) => o switch
     {
         Animation => "Animation",
         Element e => e.Type.ToString(),
-        _ => "",
+        _ => "Scene",
     };
 
-    private TreeNode CreateNode(object o)
+    /// <summary>
+    /// Creates the node of <paramref name="o"/> and its branch. A <paramref name="lazy"/> node gets a
+    /// placeholder instead of its children, and builds them when it is opened or something in it is
+    /// looked up (<see cref="TryGetNode"/>): an animation may have hundreds of key states with hundreds
+    /// of elements each, far too many WPF items to build at once.
+    /// </summary>
+    private TreeViewItem CreateNode(object o, bool lazy = false)
     {
-        var node = new TreeNode(NodeText(o)) { Tag = o, ImageKey = ImageKey(o), SelectedImageKey = ImageKey(o) };
+        var text = new TextBlock { Text = NodeText(o), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(7, 0, 0, 0) };
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Children = { Icons.Shape(IconName(o)), text } };
+        var node = new TreeViewItem { Header = header, Tag = o };
+        node.Loaded += (_, _) => ShowChevronOpen(node);
+        System.Windows.Automation.AutomationProperties.SetName(node, NodeText(o));
         _nodes[o] = node;
         if (o is GroupElement g)
-            foreach (var c in g.Children)
-                node.Nodes.Add(CreateNode(c));
+        {
+            if (lazy && g.Children.Count > 0)
+            {
+                node.Items.Add(new TreeViewItem { Tag = PendingBranch });
+                node.Expanded += (_, e) =>
+                {
+                    if (ReferenceEquals(e.OriginalSource, node)) BuildBranch(node);
+                };
+            }
+            else
+            {
+                foreach (var c in g.Children)
+                    node.Items.Add(CreateNode(c));
+            }
+        }
         return node;
+    }
+
+    /// <summary>The placeholder child of a node whose branch is not built yet.</summary>
+    private static readonly object PendingBranch = new();
+
+    private void BuildBranch(TreeViewItem node)
+    {
+        if (node.Items.Count != 1 || node.Items[0] is not TreeViewItem { Tag: var tag } || tag != PendingBranch || node.Tag is not GroupElement g)
+            return;
+        node.Items.Clear();
+        foreach (var c in g.Children)
+            node.Items.Add(CreateNode(c));
+    }
+
+    /// <summary>The node of <paramref name="o"/>, building the branch of its key state if needed.</summary>
+    private bool TryGetNode(object o, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TreeViewItem? node)
+    {
+        if (_nodes.TryGetValue(o, out node)) return true;
+        if (o is Element e && SceneOf(e) is { } scene && _nodes.TryGetValue(scene, out var sceneNode))
+        {
+            BuildBranch(sceneNode);
+            return _nodes.TryGetValue(o, out node);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Fluent turns a node's chevron by an animation when the node opens, which does not run for a node
+    /// that is already open when it appears: turn it here.
+    /// </summary>
+    private static void ShowChevronOpen(TreeViewItem node)
+    {
+        if (!node.IsExpanded || node.Template?.FindName("Expander", node) is not ToggleButton toggle) return;
+        toggle.ApplyTemplate();
+        if (toggle.Template?.FindName("ChevronContainer", toggle) is UIElement { RenderTransform: RotateTransform { IsFrozen: false } turn } && turn.Angle == 0)
+            turn.Angle = 90;
+    }
+
+    private static TextBlock NodeLabel(TreeViewItem node) => (TextBlock)((StackPanel)node.Header).Children[1];
+
+    private static void ExpandAll(TreeViewItem node)
+    {
+        node.IsExpanded = true;
+        foreach (var child in node.Items.OfType<TreeViewItem>()) ExpandAll(child);
+    }
+
+    /// <summary>Selects a node, opening its branch and scrolling it into view.</summary>
+    private static void SelectNode(TreeViewItem node)
+    {
+        for (var p = node.Parent as TreeViewItem; p != null; p = p.Parent as TreeViewItem) p.IsExpanded = true;
+        node.IsSelected = true;
+        node.Dispatcher.InvokeAsync(node.BringIntoView, DispatcherPriority.Loaded);
+    }
+
+    private static TreeViewItem? ItemAt(object? source)
+    {
+        for (var d = source as DependencyObject; d != null; d = d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+            if (d is TreeViewItem item) return item;
+        return null;
     }
 
     private void RebuildTree()
     {
         _suppressTreeSelect = true;
-        _tree.BeginUpdate();
         try
         {
             _nodes.Clear();
-            _tree.Nodes.Clear();
+            Tree.Items.Clear();
             var root = CreateNode(_animation);
             foreach (var s in _animation.Scenes)
-                root.Nodes.Add(CreateNode(s));
-            _tree.Nodes.Add(root);
-            root.Expand();
-            if (_nodes.TryGetValue(_currentScene, out var sn)) sn.ExpandAll();
+                root.Items.Add(CreateNode(s, lazy: !ReferenceEquals(s, _currentScene)));
+            Tree.Items.Add(root);
+            root.IsExpanded = true;
+            if (_nodes.TryGetValue(_currentScene, out var sn)) ExpandAll(sn);
 
             object target = (object?)_selected ?? _currentScene;
-            if (_nodes.TryGetValue(target, out var sel))
-            {
-                _tree.SelectedNode = sel;
-                sel.EnsureVisible();
-            }
+            if (TryGetNode(target, out var sel)) SelectNode(sel);
         }
         finally
         {
-            _tree.EndUpdate();
             _suppressTreeSelect = false;
         }
         ShowProperties();
         UpdateStatus();
     }
 
-    private void Tree_AfterSelect(object? sender, TreeViewEventArgs e)
+    private void Tree_AfterSelect()
     {
-        if (_suppressTreeSelect || e.Node == null) return;
-        switch (e.Node.Tag)
+        if (_suppressTreeSelect || Tree.SelectedItem is not TreeViewItem node) return;
+        switch (node.Tag)
         {
             case Animation:
                 _selected = null;
@@ -777,52 +778,105 @@ internal sealed class MainForm : Form
         _gl.Invalidate();
     }
 
-    private void Tree_AfterLabelEdit(object? sender, NodeLabelEditEventArgs e)
+    /// <summary>Edits the name of the selected node in place (F2); Enter or leaving the field takes it, Esc cancels.</summary>
+    private void BeginRename()
     {
-        e.CancelEdit = true; // we set the (sanitised) text ourselves
-        if (e.Label == null || e.Node == null) return;
-        string label = e.Label.Trim();
+        if (_renaming != null || Tree.SelectedItem is not TreeViewItem { Tag: { } tag } node) return;
+        var header = (StackPanel)node.Header;
+        var label = NodeLabel(node);
+        var box = new TextBox
+        {
+            Text = tag switch { Animation a => a.Name, Element el => el.Name, _ => label.Text },
+            MinWidth = 140,
+            MinHeight = 0,
+            Padding = new Thickness(4, 1, 4, 1),
+            Margin = new Thickness(4, 0, 0, 0),
+        };
+        header.Children[1] = box;
+        _renaming = node;
+        bool done = false;
+
+        void Finish(bool commit)
+        {
+            if (done) return;
+            done = true;
+            header.Children[1] = label;
+            _renaming = null;
+            if (commit) Rename(node, box.Text);
+            node.Focus();
+        }
+
+        box.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) { Finish(true); e.Handled = true; }
+            else if (e.Key == Key.Escape) { Finish(false); e.Handled = true; }
+        };
+        box.LostKeyboardFocus += (_, _) => Finish(true);
+        box.Loaded += (_, _) =>
+        {
+            box.Focus();
+            box.SelectAll();
+        };
+    }
+
+    private void Rename(TreeViewItem node, string text)
+    {
+        string label = text.Trim();
         if (label.Length == 0) return;
-        var node = e.Node;
         switch (node.Tag)
         {
             case Animation a:
+                if (a.Name == label) return;
                 a.Name = label;
                 break;
             case Scene s:
-                s.Name = label.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+                label = label.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+                if (s.Name == label) return;
+                s.Name = label;
                 break;
             case Element el:
+                if (el.Name == label) return;
                 el.Name = label;
                 break;
             default:
                 return;
         }
         MarkDirty();
-        BeginInvoke(() =>
-        {
-            node.Text = NodeText(node.Tag!);
-            _grid.Refresh();
-        });
+        NodeLabel(node).Text = NodeText(node.Tag!);
+        System.Windows.Automation.AutomationProperties.SetName(node, NodeText(node.Tag!));
+        Properties.RefreshValues();
     }
 
-    private void Tree_DragOver(object? sender, DragEventArgs e)
+    private void Tree_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        e.Effect = DragDropEffects.None;
-        if (e.Data?.GetData(typeof(TreeNode)) is not TreeNode { Tag: Element source }) return;
-        var target = _tree.GetNodeAt(_tree.PointToClient(new Point(e.X, e.Y)));
-        if (target?.Tag is not Element dest) return;
-        if (IsSelfOrDescendant(dest, source)) return;
-        e.Effect = (e.KeyState & 8) != 0 || (e.KeyState & 4) != 0 ? DragDropEffects.Copy : DragDropEffects.Move;
-        target.EnsureVisible();
+        if (e.LeftButton != MouseButtonState.Pressed || _renaming != null || _treeDragItem is not { Tag: Element and not Scene } item) return;
+        var p = e.GetPosition(Tree);
+        if (Math.Abs(p.X - _treeDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(p.Y - _treeDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        _treeDragItem = null;
+        DragDrop.DoDragDrop(item, new DataObject(DragFormat, item.Tag), DragDropEffects.Move | DragDropEffects.Copy);
     }
 
-    private void Tree_DragDrop(object? sender, DragEventArgs e)
+    private const string DragFormat = "Overbryce.Element";
+
+    /// <summary>Ctrl (or Shift) while dragging copies.</summary>
+    private static bool CopyKey(DragEventArgs e) => (e.KeyStates & (DragDropKeyStates.ControlKey | DragDropKeyStates.ShiftKey)) != 0;
+
+    private void Tree_DragOver(object sender, DragEventArgs e)
     {
-        if (e.Data?.GetData(typeof(TreeNode)) is not TreeNode { Tag: Element source }) return;
-        var targetNode = _tree.GetNodeAt(_tree.PointToClient(new Point(e.X, e.Y)));
-        if (targetNode?.Tag is not Element dest || IsSelfOrDescendant(dest, source)) return;
-        bool copy = e.Effect == DragDropEffects.Copy;
+        e.Effects = DragDropEffects.None;
+        e.Handled = true;
+        if (e.Data.GetData(DragFormat) is not Element source) return;
+        if (ItemAt(e.OriginalSource) is not { Tag: Element dest } target || IsSelfOrDescendant(dest, source)) return;
+        e.Effects = CopyKey(e) ? DragDropEffects.Copy : DragDropEffects.Move;
+        target.BringIntoView();
+    }
+
+    private void Tree_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DragFormat) is not Element source) return;
+        if (ItemAt(e.OriginalSource) is not { Tag: Element dest } || IsSelfOrDescendant(dest, source)) return;
+        bool copy = CopyKey(e);
 
         GroupElement container;
         int index;
@@ -874,7 +928,7 @@ internal sealed class MainForm : Form
 
     private void ShowProperties()
     {
-        _grid.SelectedObject = _tree.SelectedNode?.Tag switch
+        Properties.SelectedObject = (Tree.SelectedItem as TreeViewItem)?.Tag switch
         {
             Animation a => a,
             Element e => new ElementView(e),
@@ -882,9 +936,8 @@ internal sealed class MainForm : Form
         };
     }
 
-    private void Grid_PropertyValueChanged(object? s, PropertyValueChangedEventArgs e)
+    private void Grid_PropertyValueChanged(string prop)
     {
-        string? prop = e.ChangedItem?.PropertyDescriptor?.Name;
         MarkDirty();
 
         if (_selected is CameraElement cam && prop == nameof(CameraElement.Active) && cam.Active)
@@ -897,7 +950,7 @@ internal sealed class MainForm : Form
         }
         else
         {
-            _grid.Refresh();
+            Properties.RefreshValues();
         }
         UpdateTimeline();
         UpdateStatus();
@@ -950,12 +1003,12 @@ internal sealed class MainForm : Form
         int cameras = adding is GroupElement cg ? cg.Descendants().OfType<CameraElement>().Count() : adding is CameraElement ? 1 : 0;
         if (lights > 0 && scene.Lights.Count() + lights > LightElement.MaxPerScene)
         {
-            MessageBox.Show(this, $"A key state can contain at most {LightElement.MaxPerScene} lights.", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Message.Show(this, $"A key state can contain at most {LightElement.MaxPerScene} lights.", MessageKind.Warning);
             return false;
         }
         if (cameras > 0 && scene.Cameras.Count() + cameras > CameraElement.MaxPerScene)
         {
-            MessageBox.Show(this, $"A key state can contain at most {CameraElement.MaxPerScene} cameras.", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Message.Show(this, $"A key state can contain at most {CameraElement.MaxPerScene} cameras.", MessageKind.Warning);
             return false;
         }
         return true;
@@ -975,7 +1028,7 @@ internal sealed class MainForm : Form
 
     private void DeleteSelected()
     {
-        if (_tree.SelectedNode is { IsEditing: true }) return;
+        if (_renaming != null) return;
         if (_selected is Scene)
         {
             DeleteState();
@@ -995,14 +1048,14 @@ internal sealed class MainForm : Form
         if (_selected is not CameraElement cam || SceneOf(cam) is not { } scene) return;
         scene.SetActiveCamera(cam);
         MarkDirty();
-        _grid.Refresh();
+        Properties.RefreshValues();
         _gl.Invalidate();
     }
 
     private void MoveSelected(int dx, int dy, int dz)
     {
         if (_selected == null) return;
-        float step = (float)_moveStep.Value;
+        float step = (float)MoveStep.Value;
         _selected.X += dx * step;
         _selected.Y += dy * step;
         _selected.Z += dz * step;
@@ -1012,7 +1065,7 @@ internal sealed class MainForm : Form
     private void RotateSelected(int axis, int sign)
     {
         if (_selected == null) return;
-        float deg = sign * (float)_rotateStep.Value;
+        float deg = sign * (float)RotateStep.Value;
         if (_selected is LightElement light)
         {
             // for lights alpha/beta/gamma are the spot direction vector: rotate the vector
@@ -1044,7 +1097,7 @@ internal sealed class MainForm : Form
     {
         if (_previewTime != null) ExitPreview();
         MarkDirty();
-        _grid.Refresh();
+        Properties.RefreshValues();
         _gl.Invalidate();
     }
 
@@ -1086,11 +1139,11 @@ internal sealed class MainForm : Form
     {
         if (_animation.Scenes.Count <= 1)
         {
-            MessageBox.Show(this, "The animation needs at least one key state.", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Message.Show(this, "The animation needs at least one key state.");
             return;
         }
-        if (MessageBox.Show(this, $"Delete key state '{_currentScene.Name}' at {_currentScene.AniTime:0.###} s?", AppTitle,
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        if (Message.Ask(this, $"Delete key state '{_currentScene.Name}' at {_currentScene.AniTime:0.###} s?",
+                MessageKind.Question, MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         int index = _animation.Scenes.IndexOf(_currentScene);
         _animation.Scenes.RemoveAt(index);
         MarkDirty();
@@ -1110,31 +1163,50 @@ internal sealed class MainForm : Form
 
     private void UpdateViewChecks()
     {
-        foreach (var (mode, item) in _viewItems) item.Checked = mode == _viewMode;
-        _wireItem.Checked = _wireframe;
-        _modernItem.Checked = _modernView;
+        CameraViewButton.IsChecked = CameraViewItem.IsChecked = _viewMode == ViewMode.Camera;
+        FrontViewButton.IsChecked = FrontViewItem.IsChecked = _viewMode == ViewMode.Front;
+        SideViewButton.IsChecked = SideViewItem.IsChecked = _viewMode == ViewMode.Side;
+        TopViewButton.IsChecked = TopViewItem.IsChecked = _viewMode == ViewMode.Top;
+        WireButton.IsChecked = WireItem.IsChecked = _wireframe;
+        ModernButton.IsChecked = ModernItem.IsChecked = _modernView;
+        ThemeSystemItem.IsChecked = Theme.Choice == ThemeChoice.System;
+        ThemeLightItem.IsChecked = Theme.Choice == ThemeChoice.Light;
+        ThemeDarkItem.IsChecked = Theme.Choice == ThemeChoice.Dark;
     }
 
     // ==================================================================================== timeline & playback
 
-    private float TimelineToTime(int value)
+    private float TimelineToTime(double value)
     {
         float start = _animation.StartTime, end = _animation.EndTime;
-        return start + (end - start) * value / _timeline.Maximum;
+        return start + (end - start) * (float)(value / Timeline.Maximum);
     }
 
-    private int TimeToTimeline(float t)
+    private double TimeToTimeline(float t)
     {
         float start = _animation.StartTime, end = _animation.EndTime;
         if (end <= start) return 0;
-        return (int)Math.Round(Math.Clamp((t - start) / (end - start), 0, 1) * _timeline.Maximum);
+        return Math.Clamp((t - start) / (end - start), 0, 1) * Timeline.Maximum;
+    }
+
+    private void SetTimeline(double value)
+    {
+        _settingTimeline = true;
+        try
+        {
+            Timeline.Value = value;
+        }
+        finally
+        {
+            _settingTimeline = false;
+        }
     }
 
     private void UpdateTimeline()
     {
         float t = _previewTime ?? _currentScene.AniTime;
-        _timeline.Value = TimeToTimeline(t);
-        _timeline.Enabled = _animation.Scenes.Count > 1;
+        SetTimeline(TimeToTimeline(t));
+        Timeline.IsEnabled = _animation.Scenes.Count > 1;
         UpdateTimeLabel();
     }
 
@@ -1142,7 +1214,7 @@ internal sealed class MainForm : Form
     {
         float t = _previewTime ?? _currentScene.AniTime;
         string mode = _previewTime != null ? "preview" : "key state";
-        _timeLabel.Text = $"t = {t:0.00} s / {_animation.EndTime:0.00} s ({mode})";
+        TimeLabel.Text = $"t = {t:0.00} s / {_animation.EndTime:0.00} s ({mode})";
     }
 
     private void ExitPreview()
@@ -1155,15 +1227,15 @@ internal sealed class MainForm : Form
 
     private void TogglePlay()
     {
-        if (_playTimer.Enabled)
+        if (_playTimer.IsEnabled)
         {
             StopPlay();
             return;
         }
         if (_animation.Scenes.Count < 2)
         {
-            MessageBox.Show(this, "The animation needs at least two key states to play. Use View > Next key state (PgDn) to add one.",
-                AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            PlayButton.IsChecked = false;
+            Message.Show(this, "The animation needs at least two key states to play. Use View > Next key state (PgDn) to add one.");
             return;
         }
         float t = _previewTime ?? _animation.StartTime;
@@ -1171,15 +1243,17 @@ internal sealed class MainForm : Form
         _playStart = t;
         _playClock.Restart();
         _playTimer.Start();
-        _playButton.Text = "Stop";
+        PlayButton.IsChecked = true;
+        PlayGlyph.Text = Icons.Pause;
     }
 
     private void StopPlay()
     {
-        if (!_playTimer.Enabled) return;
+        PlayButton.IsChecked = false;
+        PlayGlyph.Text = Icons.Play;
+        if (!_playTimer.IsEnabled) return;
         _playTimer.Stop();
         _playClock.Stop();
-        _playButton.Text = "Play";
     }
 
     private void PlayTick()
@@ -1187,7 +1261,7 @@ internal sealed class MainForm : Form
         float t = _playStart + (float)_playClock.Elapsed.TotalSeconds;
         if (t > _animation.EndTime)
         {
-            if (_loopCheck.Checked)
+            if (LoopButton.IsChecked == true)
             {
                 _playStart = _animation.StartTime;
                 _playClock.Restart();
@@ -1200,7 +1274,7 @@ internal sealed class MainForm : Form
             }
         }
         _previewTime = t;
-        _timeline.Value = TimeToTimeline(t);
+        SetTimeline(TimeToTimeline(t));
         UpdateTimeLabel();
         UpdateStatus();
         _gl.Invalidate();
@@ -1211,11 +1285,10 @@ internal sealed class MainForm : Form
     private bool ConfirmDiscard()
     {
         if (!_dirty) return true;
-        var r = MessageBox.Show(this, $"Save changes to '{_animation.Name}'?", AppTitle, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-        return r switch
+        return Message.Ask(this, $"Save changes to '{_animation.Name}'?", MessageKind.Question, MessageBoxButton.YesNoCancel) switch
         {
-            DialogResult.Yes => Save(false),
-            DialogResult.No => true,
+            MessageBoxResult.Yes => Save(false),
+            MessageBoxResult.No => true,
             _ => false,
         };
     }
@@ -1229,12 +1302,12 @@ internal sealed class MainForm : Form
     private void OpenWithDialog()
     {
         if (!ConfirmDiscard()) return;
-        using var dlg = new OpenFileDialog
+        var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Filter = "Overbryce animations (*.ani)|*.ani|All files|*.*",
             InitialDirectory = _filePath != null ? Path.GetDirectoryName(_filePath) : Path.Combine(AppContext.BaseDirectory, "Scenes"),
         };
-        if (dlg.ShowDialog(this) == DialogResult.OK) OpenFile(dlg.FileName);
+        if (dlg.ShowDialog(this) == true) OpenFile(dlg.FileName);
     }
 
     private void OpenFile(string path)
@@ -1247,7 +1320,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or AniFormatException or FormatException)
         {
-            MessageBox.Show(this, $"Cannot open '{path}':\n{ex.Message}", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Message.Show(this, $"Cannot open '{path}':\n{ex.Message}", MessageKind.Error);
         }
     }
 
@@ -1283,13 +1356,13 @@ internal sealed class MainForm : Form
         string? path = _filePath;
         if (saveAs || path == null)
         {
-            using var dlg = new SaveFileDialog
+            var dlg = new Microsoft.Win32.SaveFileDialog
             {
                 Filter = "Overbryce animations (*.ani)|*.ani",
                 FileName = path != null ? Path.GetFileName(path) : _animation.Name + ".ani",
                 InitialDirectory = path != null ? Path.GetDirectoryName(path) : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+            if (dlg.ShowDialog(this) != true) return false;
             path = dlg.FileName;
         }
 
@@ -1300,7 +1373,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Cannot save '{path}':\n{ex.Message}", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Message.Show(this, $"Cannot save '{path}':\n{ex.Message}", MessageKind.Error);
             return false;
         }
 
@@ -1308,7 +1381,7 @@ internal sealed class MainForm : Form
         TextureFileEditor.BaseDirectory = Path.GetDirectoryName(_filePath);
         _dirty = false;
         UpdateTitle();
-        _grid.Refresh();
+        Properties.RefreshValues();
         return true;
     }
 
@@ -1366,18 +1439,18 @@ internal sealed class MainForm : Form
     {
         if (_animation.Scenes.Count < 2)
         {
-            MessageBox.Show(this, "The animation needs at least two key states.", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Message.Show(this, "The animation needs at least two key states.");
             return;
         }
         string ext = _settings.ExportPng ? ".png" : ".bmp";
-        using var dlg = new SaveFileDialog
+        var dlg = new Microsoft.Win32.SaveFileDialog
         {
             Title = "Export frames - choose the base file name",
             Filter = _settings.ExportPng ? "PNG images (*.png)|*.png" : "Bitmaps (*.bmp)|*.bmp",
             FileName = _animation.Name + ext,
             InitialDirectory = _filePath != null ? Path.GetDirectoryName(_filePath) : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
         };
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (dlg.ShowDialog(this) != true) return;
 
         string dir = Path.GetDirectoryName(dlg.FileName)!;
         string stem = Path.GetFileNameWithoutExtension(dlg.FileName);
@@ -1388,9 +1461,9 @@ internal sealed class MainForm : Form
 
         StopPlay();
         _exportCancel = false;
-        Enabled = false;
-        var cancelHook = new KeyEventHandler((_, e) => { if (e.KeyCode == Keys.Escape) _exportCancel = true; });
-        KeyDown += cancelHook;
+        _exporting = true;
+        Root.IsEnabled = false;
+        Focus(); // Esc reaches the window while its content is disabled
         bool trace = _settings.Renderer == ExportRenderer.RayTraced && !_wireframe;
         bool modern = _settings.Renderer switch
         {
@@ -1414,7 +1487,7 @@ internal sealed class MainForm : Form
                     var job = bridge.Prepare(_animation, scene, times[i], ViewMode.Camera, _editor, size.Width, size.Height,
                         _settings.AlphaBlend, classic: false, _animation.Raytrace, (uint)i);
                     if (!TraceWithEvents(job, _animation.Raytrace.Samples, p =>
-                            _warningStatus.Text = $"Ray tracing frame {i + 1} / {times.Count}: {p:0%} (Esc cancels)..."))
+                            WarningStatus.Text = $"Ray tracing frame {i + 1} / {times.Count}: {p:0%} (Esc cancels)..."))
                         break;
                     using var traced = RaytraceBridge.ToBitmap(job.Resolve());
                     traced.Save(Path.Combine(dir, name), format);
@@ -1438,21 +1511,21 @@ internal sealed class MainForm : Form
                 }
                 names.Add(name);
 
-                _warningStatus.Text = $"Exporting frame {i + 1} / {times.Count} (Esc cancels)...";
-                Application.DoEvents();
+                WarningStatus.Text = $"Exporting frame {i + 1} / {times.Count} (Esc cancels)...";
+                DoEvents();
             }
             File.WriteAllLines(Path.Combine(dir, "list.lst"), names);
-            _warningStatus.Text = (_exportCancel ? "Export cancelled after " : "Exported ") + $"{names.Count} frames to {dir}" +
-                                  (bridge != null ? $" (ray traced in {watch.Elapsed.TotalSeconds:0} s)" : "");
+            WarningStatus.Text = (_exportCancel ? "Export cancelled after " : "Exported ") + $"{names.Count} frames to {dir}" +
+                                 (bridge != null ? $" (ray traced in {watch.Elapsed.TotalSeconds:0} s)" : "");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {
-            MessageBox.Show(this, "Export failed:\n" + ex.Message, AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Message.Show(this, "Export failed:\n" + ex.Message, MessageKind.Error);
         }
         finally
         {
-            KeyDown -= cancelHook;
-            Enabled = true;
+            _exporting = false;
+            Root.IsEnabled = true;
             OpenTK.Graphics.OpenGL4.GL.BindFramebuffer(OpenTK.Graphics.OpenGL4.FramebufferTarget.Framebuffer, 0);
             _gl.Invalidate();
         }
@@ -1469,7 +1542,7 @@ internal sealed class MainForm : Form
         var task = Task.Run(() => job.Trace(samples, progress, cancel.Token), cancel.Token);
         while (!task.IsCompleted)
         {
-            Application.DoEvents();
+            DoEvents();
             if (_exportCancel) cancel.Cancel();
             report(progress.Value);
             task.Wait(40);
@@ -1485,9 +1558,15 @@ internal sealed class MainForm : Form
         }
     }
 
-    // ==================================================================================== ray traced view
+    /// <summary>Lets the window handle its pending messages (input, painting) during a long job on the UI thread.</summary>
+    private static void DoEvents()
+    {
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.InvokeAsync(() => frame.Continue = false, DispatcherPriority.Background);
+        Dispatcher.PushFrame(frame);
+    }
 
-    private RaytracePreviewForm? _raytraced;
+    // ==================================================================================== ray traced view
 
     /// <summary>View > Ray trace this view (F9): the shown state through the shown camera, in its own window.</summary>
     private void RaytraceView()
@@ -1503,21 +1582,22 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _warningStatus.Text = "Ray tracing failed: " + ex.Message;
+            WarningStatus.Text = "Ray tracing failed: " + ex.Message;
             return;
         }
 
-        if (_raytraced == null || _raytraced.IsDisposed)
+        if (_raytraced == null)
         {
-            _raytraced = new RaytracePreviewForm();
-            _raytraced.Show(this);
+            _raytraced = new RaytracePreviewWindow { Owner = this };
+            _raytraced.Closed += (_, _) => _raytraced = null;
+            _raytraced.Show();
         }
         else
         {
             _raytraced.Activate();
         }
         string what = _previewTime is float pt ? $"{pt:0.00} s" : $"key state {_animation.Scenes.IndexOf(_currentScene) + 1}";
-        _raytraced.Start(job, _animation.Raytrace.Samples, $"{what}, {_viewStatus.Text}");
+        _raytraced.Start(job, _animation.Raytrace.Samples, $"{what}, {ViewStatus.Text}");
     }
 
     // ==================================================================================== misc
@@ -1532,23 +1612,23 @@ internal sealed class MainForm : Form
     private void UpdateTitle()
     {
         string name = _filePath != null ? Path.GetFileName(_filePath) : "(untitled)";
-        Text = $"{name}{(_dirty ? " *" : "")} - {AppTitle}";
+        Title = $"{name}{(_dirty ? " *" : "")} - {AppTitle}";
     }
 
     private void UpdateStatus()
     {
         int index = _animation.Scenes.IndexOf(_currentScene);
-        _stateStatus.Text = _previewTime is float t
+        StateStatus.Text = _previewTime is float t
             ? $"Preview at {t:0.00} s"
             : $"Key state {index + 1} / {_animation.Scenes.Count}  ({_currentScene.Name}, {_currentScene.AniTime:0.###} s)";
-        _viewStatus.Text = (_wireframe ? "Wire frame, " : _modernView ? "Modern, " : "") + _viewMode switch
+        ViewStatus.Text = (_wireframe ? "Wire frame, " : _modernView ? "Modern, " : "") + _viewMode switch
         {
             ViewMode.Camera => "camera view",
             ViewMode.Front => "front view",
             ViewMode.Side => "side view",
             _ => "top view",
         };
-        _selectionStatus.Text = _selected is null or Scene
+        SelectionStatus.Text = _selected is null or Scene
             ? "Click an object to select it"
             : _selected.Parent is null or Scene
                 ? $"Selected: {_selected.Name}"
@@ -1557,66 +1637,42 @@ internal sealed class MainForm : Form
 
     private void ShowHelp()
     {
-        MessageBox.Show(this,
-            "Tree: select key states and elements, F2 renames, Del deletes, drag to move into another group/state (Ctrl+drag copies).\r\n" +
-            "Elements with the same name in neighbouring key states are interpolated (Catmull-Rom spline over the key-state times).\r\n\r\n" +
-            "View: click an object to select it, Alt+click selects its group (repeat to go further up), click the background to select the key state.\r\n" +
-            "Left-drag orbits the editor camera, mouse wheel zooms (front/side/top views). Ctrl+1..4 switch views, Ctrl+W toggles wire frame, Ctrl+M modern rendering.\r\n" +
-            "F9 ray traces the view in its own window (reflections, glass, soft shadows; Animation > Ray tracing settings sets the quality).\r\n" +
-            "In the wire frame view lights (yellow) and cameras (green, active cyan) are shown and can be clicked too.\r\n" +
-            "'Stop at this state' (Final) makes an element come to rest at that key state; otherwise it moves smoothly through it.\r\n" +
-            "PgDn on the last key state creates a copy 5 s later; edit it to define the motion.\r\n\r\n" +
-            "Timeline: drag to preview the interpolated animation, F5 plays it. File > Export frames renders BMP/PNG frames through the active camera\r\n" +
-            "(File > Rendering settings chooses the renderer: as the view, classic, modern or ray traced).",
-            "Controls", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        Message.Show(this,
+            "Tree: select key states and elements, F2 renames, Del deletes, drag to move into another group/state (Ctrl+drag copies).\n" +
+            "Elements with the same name in neighbouring key states are interpolated (Catmull-Rom spline over the key-state times).\n\n" +
+            "View: click an object to select it, Alt+click selects its group (repeat to go further up), click the background to select the key state.\n" +
+            "Left-drag orbits the editor camera, mouse wheel zooms (front/side/top views). Ctrl+1..4 switch views, Ctrl+W toggles wire frame, Ctrl+M modern rendering.\n" +
+            "F9 ray traces the view in its own window (reflections, glass, soft shadows; Animation > Ray tracing settings sets the quality).\n" +
+            "In the wire frame view lights (yellow) and cameras (green, active cyan) are shown and can be clicked too.\n" +
+            "'Stop at this state' (Final) makes an element come to rest at that key state; otherwise it moves smoothly through it.\n" +
+            "PgDn on the last key state creates a copy 5 s later; edit it to define the motion.\n\n" +
+            "Properties: Enter takes a typed value, Esc restores it, Up/Down step a number (Shift: x10, Ctrl: x0.1).\n" +
+            "Timeline: drag to preview the interpolated animation, F5 plays it. File > Export frames renders BMP/PNG frames through the active camera " +
+            "(File > Rendering settings chooses the renderer: as the view, classic, modern or ray traced).\n" +
+            "View > Theme switches between light and dark (or follows Windows).",
+            MessageKind.Information, "Controls");
     }
 
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-    {
-        // shortcuts that must not steal keys from text editing in the grid / tree label editor
-        bool editing = _tree.SelectedNode is { IsEditing: true } || _grid.ContainsFocus;
-        if (!editing)
-        {
-            switch (keyData)
-            {
-                case Keys.Delete: DeleteSelected(); return true;
-                case Keys.F2: _tree.SelectedNode?.BeginEdit(); return true;
-                case Keys.PageUp: StepState(-1); return true;
-                case Keys.PageDown: StepState(+1); return true;
-            }
-        }
-        return base.ProcessCmdKey(ref msg, keyData);
-    }
-
-    protected override void OnFormClosing(FormClosingEventArgs e)
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         if (!ConfirmDiscard())
         {
             e.Cancel = true;
             return;
         }
-        base.OnFormClosing(e);
+        base.OnClosing(e);
     }
 
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    protected override void OnClosed(EventArgs e)
     {
         StopPlay();
+        Theme.Changed -= UpdateViewChecks;
         if (_renderer != null)
         {
             _gl.MakeCurrent();
             _renderer.Dispose();
             _renderer = null;
         }
-        base.OnFormClosed(e);
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _playTimer.Dispose();
-            foreach (var img in _toolImages.Values) img?.Dispose();
-        }
-        base.Dispose(disposing);
+        base.OnClosed(e);
     }
 }
