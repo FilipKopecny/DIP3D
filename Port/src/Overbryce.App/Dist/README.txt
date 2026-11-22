@@ -53,6 +53,7 @@ PgUp / PgDn                         previous / next key state (PgDn on the last 
 Ctrl+E                              export frames (File > Rendering settings: size, format,
                                     renderer)
 File > Import > Blender scene       import a .blend file (Esc cancels)
+File > Export to Blender            save the animation as a .blend file (Esc cancels)
 View > Theme                        light or dark window, or follow Windows
 F1                                  all controls
 

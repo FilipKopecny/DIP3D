@@ -2,6 +2,8 @@
 
 Overbryce can turn an animation into a Blender scene (`.blend`). The scene can then be rendered in EEVEE or Cycles, or edited further.
 
+In the editor, **File › Export to Blender…** asks where to save the `.blend`. It exports the animation as it is in the editor, saved or not, and writes the files below next to the `.blend`; Esc cancels. On the command line:
+
 ```powershell
 Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
 ```
@@ -22,7 +24,7 @@ Overbryce looks for Blender in the `BLENDER` environment variable (the path to `
 blender -b --factory-startup --python overbryce_blender.py -- Lumina.json Lumina.blend
 ```
 
-The script was tested with Blender 4.2. For Lumina the export takes about a minute and the build a few seconds.
+The script was tested with Blender 4.2. For Lumina the export takes one to two minutes and the build a few seconds.
 
 ## What is exported
 

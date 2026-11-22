@@ -55,6 +55,7 @@ internal sealed class BlenderExporter
     private readonly Track _scene;
     private readonly List<(int State, string? Camera)> _cameras = [];
     private readonly List<string> _warnings = [];
+    private CancellationToken _cancel;
 
     public BlenderExporter(Animation animation, string sourceFile)
     {
@@ -362,6 +363,7 @@ internal sealed class BlenderExporter
 
         for (int k = 0; k + 1 < scenes.Count; k++)
         {
+            _cancel.ThrowIfCancellationRequested();
             if (_times[k + 1] - _times[k] <= 0) continue;
             var samples = SampleU.Select(u => _animation.EvaluateSegment(k, u)).ToArray();
             var maps = samples.Select(s => Walk(s, null).ToDictionary(x => KeyOf(x.Path, x.E), x => x.E)).ToArray();
@@ -429,6 +431,7 @@ internal sealed class BlenderExporter
             for (int f = (int)MathF.Floor(Frame(t0)) + 1; f < Frame(t1) - 1e-3f; f++)
             {
                 float t = _start + f / _fps;
+                _cancel.ThrowIfCancellationRequested();
                 var scene = _animation.EvaluateSegment(k, (t - t0) / (t1 - t0));
                 var map = Walk(scene, null).ToDictionary(x => KeyOf(x.Path, x.E), x => x.E);
                 foreach (var track in tracks)
@@ -658,8 +661,9 @@ internal sealed class BlenderExporter
 
     // ================================================================== export
 
-    public Result Export(string outputDirectory, Action<string>? log = null)
+    public Result Export(string outputDirectory, Action<string>? log = null, CancellationToken cancel = default)
     {
+        _cancel = cancel;
         var clock = Stopwatch.StartNew();
         Directory.CreateDirectory(outputDirectory);
         string name = _animation.Name;
@@ -759,6 +763,7 @@ internal sealed class BlenderExporter
         int objectCount = 0;
         foreach (var track in _order)
         {
+            _cancel.ThrowIfCancellationRequested();
             track.Index = objectCount++;
             var e = track.First;
             json.WriteStartObject();
@@ -980,7 +985,7 @@ internal sealed class BlenderExporter
     public static string? FindBlender() => Core.Import.BlenderImport.FindBlender();
 
     /// <summary>Runs Blender in the background to build the .blend file; returns its exit code.</summary>
-    public static int BuildBlend(string blender, string jsonPath, string blendPath, Action<string>? log = null)
+    public static int BuildBlend(string blender, string jsonPath, string blendPath, Action<string>? log = null, CancellationToken cancel = default)
     {
         string script = Path.Combine(Path.GetDirectoryName(jsonPath)!, ScriptName);
         var info = new ProcessStartInfo(blender)
@@ -1004,7 +1009,9 @@ internal sealed class BlenderExporter
         process.ErrorDataReceived += (_, a) => Line(a.Data);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        process.WaitForExit();
+        using (cancel.Register(() => { try { process.Kill(true); } catch (InvalidOperationException) { } }))
+            process.WaitForExit();
+        cancel.ThrowIfCancellationRequested();
         return process.ExitCode;
     }
 

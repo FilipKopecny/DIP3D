@@ -215,6 +215,7 @@ Overbryce.exe LuminaBlender\Lumina.blend --import-blender LuminaBack\Lumina.ani
 | Play or stop | F5, or drag the timeline slider |
 | Export frames | Ctrl+E (Esc cancels) |
 | Import a Blender scene | *File › Import › Blender scene…* (Esc cancels) |
+| Export to Blender | *File › Export to Blender…* (Esc cancels) |
 | Show controls | F1 |
 
 More about selection and the other tools:

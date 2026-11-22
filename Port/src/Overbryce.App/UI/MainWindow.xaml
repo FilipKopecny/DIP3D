@@ -37,6 +37,9 @@
                 <MenuItem Header="_Export frames..." InputGestureText="Ctrl+E" Click="Export_Click">
                     <MenuItem.Icon><TextBlock Style="{StaticResource MenuGlyph}" Text="&#xE714;" /></MenuItem.Icon>
                 </MenuItem>
+                <MenuItem Header="Export to _Blender..." Click="ExportBlender_Click">
+                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuGlyph}" Text="&#xEDE1;" /></MenuItem.Icon>
+                </MenuItem>
                 <MenuItem Header="Rendering se_ttings..." Click="RenderSettings_Click">
                     <MenuItem.Icon><TextBlock Style="{StaticResource MenuGlyph}" Text="&#xE713;" /></MenuItem.Icon>
                 </MenuItem>

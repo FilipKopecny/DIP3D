@@ -396,6 +396,7 @@ internal sealed partial class MainWindow : Window
     private void SaveAs_Click(object sender, RoutedEventArgs e) => Save(true);
     private void Export_Click(object sender, RoutedEventArgs e) => ExportFrames();
     private void ImportBlender_Click(object sender, RoutedEventArgs e) => ImportBlender();
+    private void ExportBlender_Click(object sender, RoutedEventArgs e) => ExportBlender();
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void RenderSettings_Click(object sender, RoutedEventArgs e)
@@ -1373,7 +1374,7 @@ internal sealed partial class MainWindow : Window
             {
                 DoEvents();
                 if (_exportCancel) cancel.Cancel();
-                WarningStatus.Text = "Importing (Esc cancels): " + last;
+                WarningStatus.Text = cancel.IsCancellationRequested ? "Cancelling ..." : "Importing (Esc cancels): " + last;
                 task.Wait(80);
             }
             var result = task.GetAwaiter().GetResult();
@@ -1390,6 +1391,85 @@ internal sealed partial class MainWindow : Window
         {
             Message.Show(this, "Import failed:\n" + ex.Message, MessageKind.Error);
             WarningStatus.Text = _notice = "Import failed.";
+        }
+        finally
+        {
+            _exporting = false;
+            Root.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Exports the animation as it is in the editor (saved or not) to a Blender scene: the .blend goes where the user
+    /// chooses, with the data, the script and the textures next to it.
+    /// </summary>
+    private void ExportBlender()
+    {
+        StopPlay();
+        string? blender = Export.BlenderExporter.FindBlender();
+        if (blender == null)
+        {
+            Message.Show(this, "Blender was not found. Install Blender (4.2 or newer) or set the BLENDER environment variable to blender.exe.", MessageKind.Error);
+            return;
+        }
+        var save = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "Blender scenes (*.blend)|*.blend",
+            Title = "Export to Blender - save the scene as (its data and textures go next to it)",
+            InitialDirectory = _filePath != null ? Path.GetDirectoryName(_filePath) : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            FileName = Element.SanitizeName(_animation.Name) + ".blend",
+        };
+        if (save.ShowDialog(this) != true) return;
+
+        // textures are looked up next to the animation's file; an unsaved one finds them in Scenes
+        string source = _filePath ?? Path.Combine(AppContext.BaseDirectory, "Scenes", "untitled.ani");
+        string blend = save.FileName;
+        string folder = Path.GetDirectoryName(blend)!;
+        var animation = _animation;
+
+        _exporting = true;
+        _exportCancel = false;
+        Root.IsEnabled = false;
+        Activate();
+        Focus();
+        string last = "Sampling the animation ...";
+        using var cancel = new CancellationTokenSource();
+        var task = Task.Run(() =>
+        {
+            var result = new Export.BlenderExporter(animation, source).Export(folder, line => last = line, cancel.Token);
+            last = "Building the .blend in Blender ...";
+            int code = Export.BlenderExporter.BuildBlend(blender, result.JsonPath, blend, line => last = line, cancel.Token);
+            return (result, code);
+        }, cancel.Token);
+        try
+        {
+            while (!task.IsCompleted)
+            {
+                DoEvents();
+                if (_exportCancel) cancel.Cancel();
+                WarningStatus.Text = cancel.IsCancellationRequested ? "Cancelling ..." : "Exporting to Blender (Esc cancels): " + last;
+                task.Wait(80);
+            }
+            var (result, code) = task.GetAwaiter().GetResult();
+            if (code != 0 || !File.Exists(blend))
+            {
+                Message.Show(this, $"Blender could not build the scene (exit code {code}). See {Path.ChangeExtension(blend, ".log")}.", MessageKind.Error);
+                WarningStatus.Text = _notice = "Export to Blender failed.";
+                return;
+            }
+            WarningStatus.Text = _notice = $"Exported to {Path.GetFileName(blend)}: {result.Objects} objects, {result.Keys} keys" +
+                                           (result.Warnings.Count > 0 ? $", {result.Warnings.Count} warnings" : "");
+            if (result.Warnings.Count > 0)
+                Message.Show(this, "Exported with these warnings:\n\n" + string.Join("\n", result.Warnings.Select(w => "- " + w)), MessageKind.Warning, "Export to Blender");
+        }
+        catch (Exception) when (cancel.IsCancellationRequested)
+        {
+            WarningStatus.Text = _notice = "Export to Blender cancelled.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Message.Show(this, "Export to Blender failed:\n" + ex.Message, MessageKind.Error);
+            WarningStatus.Text = _notice = "Export to Blender failed.";
         }
         finally
         {
