@@ -393,6 +393,7 @@ internal sealed partial class MainWindow : Window
     private void Save_Click(object sender, RoutedEventArgs e) => Save(false);
     private void SaveAs_Click(object sender, RoutedEventArgs e) => Save(true);
     private void Export_Click(object sender, RoutedEventArgs e) => ExportFrames();
+    private void ImportBlender_Click(object sender, RoutedEventArgs e) => ImportBlender();
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void RenderSettings_Click(object sender, RoutedEventArgs e)
@@ -1325,6 +1326,94 @@ internal sealed partial class MainWindow : Window
         {
             Message.Show(this, $"Cannot open '{path}':\n{ex.Message}", MessageKind.Error);
         }
+    }
+
+    /// <summary>
+    /// File > Import > Blender scene: Blender (run in the background) reads the .blend file, the result is saved as a
+    /// new .ani file next to its textures, opened, and the report of what was approximated or left out is shown.
+    /// </summary>
+    private void ImportBlender()
+    {
+        StopPlay();
+        if (!ConfirmDiscard()) return;
+        string? blender = Core.Import.BlenderImport.FindBlender();
+        if (blender == null)
+        {
+            Message.Show(this, "Blender was not found. Install Blender (4.2 or newer) or set the BLENDER environment variable to blender.exe.", MessageKind.Error);
+            return;
+        }
+        var open = new Microsoft.Win32.OpenFileDialog { Filter = "Blender scenes (*.blend)|*.blend|All files|*.*", Title = "Import a Blender scene" };
+        if (open.ShowDialog(this) != true) return;
+        var save = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "Overbryce animations (*.ani)|*.ani",
+            Title = "Save the imported animation as (its textures go next to it)",
+            InitialDirectory = Path.GetDirectoryName(open.FileName),
+            FileName = Path.GetFileNameWithoutExtension(open.FileName) + ".ani",
+        };
+        if (save.ShowDialog(this) != true) return;
+
+        _exporting = true;
+        _exportCancel = false;
+        Root.IsEnabled = false;
+        string last = "Starting Blender ...";
+        WarningStatus.Text = last;
+        using var cancel = new CancellationTokenSource();
+        var options = new Core.Import.BlenderImportOptions();
+        var task = Task.Run(() => Core.Import.BlenderImport.Run(open.FileName, save.FileName, options, line => last = line, blender, cancel.Token), cancel.Token);
+        try
+        {
+            while (!task.IsCompleted)
+            {
+                DoEvents();
+                if (_exportCancel) cancel.Cancel();
+                WarningStatus.Text = "Importing (Esc cancels): " + last;
+                task.Wait(80);
+            }
+            var result = task.GetAwaiter().GetResult();
+            OpenFile(result.AniPath);
+            WarningStatus.Text = $"Imported {Path.GetFileName(open.FileName)}: {result.Animation.Scenes.Count} key states, " +
+                                 $"{result.Report.Approximated.Count} approximated, {result.Report.Dropped.Count} left out (report: {Path.GetFileName(result.ReportPath)})";
+            ShowReport("Blender import report", File.ReadAllText(result.ReportPath));
+        }
+        catch (Exception) when (cancel.IsCancellationRequested)
+        {
+            WarningStatus.Text = "Import cancelled.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException or System.Text.Json.JsonException or AniFormatException)
+        {
+            Message.Show(this, "Import failed:\n" + ex.Message, MessageKind.Error);
+            WarningStatus.Text = "Import failed.";
+        }
+        finally
+        {
+            _exporting = false;
+            Root.IsEnabled = true;
+        }
+    }
+
+    /// <summary>A long text (a report) in a window of its own.</summary>
+    private void ShowReport(string title, string text)
+    {
+        var box = new TextBox
+        {
+            Text = text,
+            IsReadOnly = true,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            TextWrapping = TextWrapping.NoWrap,
+            Padding = new Thickness(8),
+        };
+        new Window
+        {
+            Title = title,
+            Owner = this,
+            Width = 760,
+            Height = 520,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = box,
+        }.Show();
     }
 
     private void SetDocument(Animation animation, string? path)

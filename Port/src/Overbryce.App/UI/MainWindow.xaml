@@ -30,6 +30,10 @@
                     <MenuItem.Icon><TextBlock Style="{StaticResource MenuGlyph}" Text="&#xE792;" /></MenuItem.Icon>
                 </MenuItem>
                 <Separator />
+                <MenuItem Header="_Import">
+                    <MenuItem.Icon><TextBlock Style="{StaticResource MenuGlyph}" Text="&#xE8B5;" /></MenuItem.Icon>
+                    <MenuItem Header="_Blender scene..." Click="ImportBlender_Click" />
+                </MenuItem>
                 <MenuItem Header="_Export frames..." InputGestureText="Ctrl+E" Click="Export_Click">
                     <MenuItem.Icon><TextBlock Style="{StaticResource MenuGlyph}" Text="&#xE714;" /></MenuItem.Icon>
                 </MenuItem>
