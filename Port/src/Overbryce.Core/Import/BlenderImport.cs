@@ -61,8 +61,11 @@ public static class BlenderImport
         {
             string script = WriteScript(work);
             string json = Path.Combine(work, "scene.json");
+            // The textures go next to the animation only once it is saved, so a cancelled or failed import leaves nothing behind
+            string textures = Path.Combine(work, "textures");
+            Directory.CreateDirectory(textures);
             var args = new List<string> { "-b", Path.GetFullPath(blendPath), "--factory-startup", "--python", script, "--", json,
-                "--textures", outDir, "--prefix", name + "_" };
+                "--textures", textures, "--prefix", name + "_" };
             if (options.Static) args.Add("--static");
             var clock = Stopwatch.StartNew();
             log?.Invoke($"Reading {Path.GetFileName(blendPath)} with {blender} ...");
@@ -80,7 +83,10 @@ public static class BlenderImport
             report.Info.Insert(0, $"Imported {Path.GetFileName(blendPath)} into {Path.GetFileName(aniPath)} on {DateTime.Now:yyyy-MM-dd HH:mm}.");
             if (textureColors != null)
                 foreach (var t in file.Textures)
-                    Bmp24.Recolor(Path.Combine(outDir, t.File), textureColors);
+                    Bmp24.Recolor(Path.Combine(textures, t.File), textureColors);
+            cancel.ThrowIfCancellationRequested();
+            foreach (string texture in Directory.EnumerateFiles(textures))
+                File.Move(texture, Path.Combine(outDir, Path.GetFileName(texture)), true);
             AniFile.Save(animation, aniPath);
             string reportPath = Path.ChangeExtension(aniPath, ".import.txt");
             File.WriteAllText(reportPath, report.ToText("Blender import report"));

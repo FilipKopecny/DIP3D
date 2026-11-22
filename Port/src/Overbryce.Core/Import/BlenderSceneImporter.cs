@@ -1103,6 +1103,6 @@ public sealed partial class BlenderSceneImporter
         if (_boxes + _rectangles > 0)
             _report.Note($"Recognised {_boxes} box{(_boxes == 1 ? "" : "es")} and {_rectangles} rectangle{(_rectangles == 1 ? "" : "s")} (Overbryce's own shapes instead of polygon meshes).");
         int meshes = a.Scenes.SelectMany(s => s.Descendants()).OfType<PolyMeshElement>().Select(p => p.Data).Distinct().Count();
-        _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count() + _tags.Values.Count(t => t.Role == null)} elements ({_lights.Count} lights, {_cameras.Count} cameras), {meshes} polygon meshes, {_file.Textures.Count} textures.");
+        _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count() + _tags.Values.Count(t => t.Role == null)} elements ({_lights.Count} lights, {_cameras.Count} cameras), {meshes} polygon mesh{(meshes == 1 ? "" : "es")}, {_file.Textures.Count} texture{(_file.Textures.Count == 1 ? "" : "s")}.");
     }
 }

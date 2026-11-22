@@ -48,6 +48,8 @@ internal sealed partial class MainWindow : Window
     private float _playStart;
     private bool _exporting;
     private bool _exportCancel;
+    // The outcome of the last import or frame export, shown while the view has no warning
+    private string _notice = "";
 
     // ------------------------------------------------------------------ controls
     private readonly GLControl _gl;
@@ -501,7 +503,7 @@ internal sealed partial class MainWindow : Window
                 string tex = "Texture not found: " + string.Join(", ", missing.Take(3).Select(Path.GetFileName));
                 warning = warning == null ? tex : warning + "  " + tex;
             }
-            if (!_exporting) WarningStatus.Text = warning ?? "";
+            if (!_exporting) WarningStatus.Text = warning ?? _notice;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -1316,6 +1318,7 @@ internal sealed partial class MainWindow : Window
 
     private void OpenFile(string path)
     {
+        _notice = "";
         try
         {
             var animation = AniFile.Load(path);
@@ -1356,6 +1359,9 @@ internal sealed partial class MainWindow : Window
         _exporting = true;
         _exportCancel = false;
         Root.IsEnabled = false;
+        // The window must have the keyboard after the dialogs, or Esc does not reach PreviewKeyDown
+        Activate();
+        Focus();
         string last = "Starting Blender ...";
         WarningStatus.Text = last;
         using var cancel = new CancellationTokenSource();
@@ -1372,18 +1378,18 @@ internal sealed partial class MainWindow : Window
             }
             var result = task.GetAwaiter().GetResult();
             OpenFile(result.AniPath);
-            WarningStatus.Text = $"Imported {Path.GetFileName(open.FileName)}: {result.Animation.Scenes.Count} key states, " +
-                                 $"{result.Report.Approximated.Count} approximated, {result.Report.Dropped.Count} left out (report: {Path.GetFileName(result.ReportPath)})";
+            WarningStatus.Text = _notice = $"Imported {Path.GetFileName(open.FileName)}: {result.Animation.Scenes.Count} key states, " +
+                                           $"{result.Report.Approximated.Count} approximated, {result.Report.Dropped.Count} left out (report: {Path.GetFileName(result.ReportPath)})";
             ShowReport("Blender import report", File.ReadAllText(result.ReportPath));
         }
         catch (Exception) when (cancel.IsCancellationRequested)
         {
-            WarningStatus.Text = "Import cancelled.";
+            WarningStatus.Text = _notice = "Import cancelled.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException or System.Text.Json.JsonException or AniFormatException)
         {
             Message.Show(this, "Import failed:\n" + ex.Message, MessageKind.Error);
-            WarningStatus.Text = "Import failed.";
+            WarningStatus.Text = _notice = "Import failed.";
         }
         finally
         {
@@ -1608,8 +1614,8 @@ internal sealed partial class MainWindow : Window
                 DoEvents();
             }
             File.WriteAllLines(Path.Combine(dir, "list.lst"), names);
-            WarningStatus.Text = (_exportCancel ? "Export cancelled after " : "Exported ") + $"{names.Count} frames to {dir}" +
-                                 (bridge != null ? $" (ray traced in {watch.Elapsed.TotalSeconds:0} s)" : "");
+            WarningStatus.Text = _notice = (_exportCancel ? "Export cancelled after " : "Exported ") + $"{names.Count} frames to {dir}" +
+                                           (bridge != null ? $" (ray traced in {watch.Elapsed.TotalSeconds:0} s)" : "");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {
