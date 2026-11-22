@@ -337,7 +337,28 @@ def add_steps(block, path, frames_values):
     fc.update()
 
 
+def ensure_arrays(o, ob, scene):
+    """Creates the custom property arrays the channels key (an F-curve only drives an element that exists)."""
+    sizes = {}
+    for entry in list(o.get("init", [])) + list(o.get("curves", [])):
+        target, path, index = entry[0], entry[1], entry[2]
+        if target in ("prop", "scene") and index >= 0:
+            block = ob if target == "prop" else scene
+            if block is not None:
+                key = (id(block), path)
+                sizes[key] = (block, path, max(sizes.get(key, (None, None, -1))[2], index))
+    for block, path, index in sizes.values():
+        current = block.get(path)
+        try:
+            values = [float(x) for x in current] if current is not None else []
+        except TypeError:
+            values = [float(current)]
+        if len(values) <= index:
+            block[path] = values + [0.0] * (index + 1 - len(values))
+
+
 def apply_channels(ex, o, ob, inner, aim, scene):
+    ensure_arrays(o, ob, scene)
     for target, path, index, value in o.get("init", []):
         block, dp = resolve(target, path, index, ob, inner, aim, scene)
         if block is not None:
@@ -501,6 +522,13 @@ def build(json_path, blend_path):
                 wire = ob.modifiers.new("Wire", "WIREFRAME")
                 wire.thickness = 0.02
         ob.parent = parent
+        # for the Blender import: the element as it was, and which objects only help to place it
+        if "tag" in o:
+            ob["ob_tag"] = o["tag"]
+        if inner is not None and inner is not ob:
+            inner["ob_tag"] = '{"role": "pos"}'
+        if aim is not None:
+            aim["ob_tag"] = '{"role": "aim"}'
         if "rotation_mode" in o:
             ob.rotation_mode = o["rotation_mode"]
         keys += apply_channels(ex, o, ob, inner, aim, scene)
@@ -510,6 +538,9 @@ def build(json_path, blend_path):
         aims.append(aim)
 
     keys += apply_channels(ex, d["scene"], None, None, None, scene)
+    if "settings" in d["scene"]:
+        scene["ob_settings"] = d["scene"]["settings"]
+        scene["ob_keytimes"] = [float(f) for f in d["scene"]["keytimes"]]
 
     markers = d["markers"]
     first_camera = None

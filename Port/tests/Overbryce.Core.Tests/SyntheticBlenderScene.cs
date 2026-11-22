@@ -166,6 +166,31 @@ public sealed class SyntheticBlenderScene(int frames = 1)
         return AddObject(name, "CAMERA", [world], data: d, dataWidth: 10);
     }
 
+    /// <summary>Custom properties of the Blender scene (the export's ob_settings and ob_keytimes).</summary>
+    public Dictionary<string, object> SceneProps { get; } = [];
+
+    /// <summary>The sampled frame numbers (default 1, 2, 3 ...).</summary>
+    public double[]? FrameNumbers { get; set; }
+
+    /// <summary>A text custom property of an object (ob_tag).</summary>
+    public void Text(int obj, string name, string value)
+    {
+        if (_objects[obj].GetValueOrDefault("overbryce") is not Dictionary<string, string> texts)
+            _objects[obj]["overbryce"] = texts = [];
+        texts[name] = value;
+    }
+
+    /// <summary>A numeric custom property of an object, per frame (the script also writes "_local": location, rotation, scale).</summary>
+    public void Prop(int obj, string name, Func<int, float[]> valuesAt)
+    {
+        int width = valuesAt(0).Length;
+        var all = new float[Frames * width];
+        for (int f = 0; f < Frames; f++) valuesAt(f).CopyTo(all, f * width);
+        if (_objects[obj].GetValueOrDefault("props") is not Dictionary<string, long[]> props)
+            _objects[obj]["props"] = props = [];
+        props[name] = [Write(all), width];
+    }
+
     public BlenderSceneFile Build()
     {
         var json = new Dictionary<string, object?>
@@ -176,8 +201,9 @@ public sealed class SyntheticBlenderScene(int frames = 1)
             {
                 ["name"] = "Synthetic", ["fps"] = 24.0, ["frame_start"] = 1, ["frame_end"] = Frames, ["resolution"] = new[] { 960, 540 },
                 ["view_transform"] = ViewTransform, ["engine"] = "CYCLES", ["cycles_samples"] = 32, ["cycles_bounces"] = 4,
+                ["props"] = SceneProps,
             },
-            ["frames"] = Enumerable.Range(1, Frames).ToArray(),
+            ["frames"] = FrameNumbers ?? Enumerable.Range(1, Frames).Select(f => (double)f).ToArray(),
             ["objects"] = _objects,
             ["meshes"] = _meshes,
             ["materials"] = _materials,

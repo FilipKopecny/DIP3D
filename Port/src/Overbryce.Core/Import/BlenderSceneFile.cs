@@ -22,7 +22,8 @@ public sealed class BlenderSceneFile
     public string Format { get; set; } = "";
     public int Version { get; set; }
     public SceneInfo Scene { get; set; } = new();
-    public int[] Frames { get; set; } = [];
+    /// <summary>The sampled frames: whole ones, plus the moments of the key states of a scene exported by Overbryce.</summary>
+    public double[] Frames { get; set; } = [];
     public List<ObjectInfo> Objects { get; set; } = [];
     public List<MeshInfo> Meshes { get; set; } = [];
     public List<MaterialInfo> Materials { get; set; } = [];

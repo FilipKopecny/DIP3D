@@ -128,9 +128,13 @@ internal sealed class BlenderExporter
     private static Channel[] ChannelsOf(Element e) => KindOf(e) switch
     {
         Kind.Group => GroupChannels,
-        Kind.Camera => CameraChannels,
-        Kind.Light => LightChannels,
-        _ => [.. Transform, .. MaterialChannels, .. Enumerable.Range(0, ShapeParams(e).Length).Select(i => new Channel("shape", "", i))],
+        Kind.Camera => [.. CameraChannels, .. CameraPropChannels],
+        Kind.Light => [.. LightChannels, .. LightPropChannels],
+        _ =>
+        [
+            .. Transform, .. MaterialChannels, .. Enumerable.Range(0, ShapeParams(e).Length).Select(i => new Channel("shape", "", i)),
+            .. ExtChannels, .. PropChannels("ob_shape", ShapeParams(e).Length),
+        ],
     };
 
     /// <summary>The channel values of an element, already in Blender's units.</summary>
@@ -142,7 +146,11 @@ internal sealed class BlenderExporter
                 return [e.X, e.Y, e.Z, e.Alpha * Deg, e.Beta * Deg, e.Gamma * Deg];
             case CameraElement c:
                 float fov = Math.Clamp(c.FieldOfView, 1f, 179f);
-                return [e.X, e.Y, e.Z, e.Alpha * Deg, e.Beta * Deg, e.Gamma * Deg, SensorHeight / 2 / MathF.Tan(fov * Deg / 2)];
+                return
+                [
+                    e.X, e.Y, e.Z, e.Alpha * Deg, e.Beta * Deg, e.Gamma * Deg, SensorHeight / 2 / MathF.Tan(fov * Deg / 2),
+                    c.FieldOfView, c.Aperture, c.Focus, c.Near, c.Far,
+                ];
             case LightElement l:
                 float cut = (float)(l.SpotCutoff > 90 ? 90 : Math.Max(l.SpotCutoff, 0.5));
                 return
@@ -150,6 +158,7 @@ internal sealed class BlenderExporter
                     l.X, l.Y, l.Z, l.X + l.Alpha, l.Y + l.Beta, l.Z + l.Gamma,
                     l.Diffuse.R, l.Diffuse.G, l.Diffuse.B, MathF.Max(l.Specular.R, MathF.Max(l.Specular.G, l.Specular.B)),
                     l.Enabled ? 1 : 0, 2 * cut * Deg, SpotBlend(cut, (float)l.SpotExponent),
+                    .. LightPropValues(l),
                 ];
             default:
                 return
@@ -159,6 +168,8 @@ internal sealed class BlenderExporter
                     e.Emission.R, e.Emission.G, e.Emission.B,
                     e.Ambient.R, e.Ambient.G, e.Ambient.B,
                     e.Specular.R, e.Specular.G, e.Specular.B, Math.Clamp(e.Shininess, 0f, 1f),
+                    .. ShapeParams(e),
+                    .. ExtValues(e),
                     .. ShapeParams(e),
                 ];
         }
@@ -190,43 +201,99 @@ internal sealed class BlenderExporter
     }
 
     /// <summary>The size parameters a shape's vertices depend on linearly (they can become shape keys).</summary>
-    private static float[] ShapeParams(Element e) => e switch
-    {
-        SphereElement s => [(float)s.Radius],
-        ConeElement c => [(float)c.BaseRadius, (float)c.TopRadius, (float)c.Height],
-        DiskElement d => [(float)d.InnerRadius, (float)d.OuterRadius],
-        BoxElement b => [b.SizeX, b.SizeY, b.SizeZ],
-        RectangleElement r => [r.SizeX, r.SizeY],
-        TriangleElement t => [t.X1, t.Y1, t.X2, t.Y2],
-        TorusElement t => [t.TubeRadius, t.RingRadius],
-        MeshElement m => (float[])m.Points.Clone(),
-        _ => [],
-    };
+    private static float[] ShapeParams(Element e) => ShapeParameters.Get(e);
 
-    private static void SetShapeParam(Element e, int i, float v)
+    private static void SetShapeParam(Element e, int i, float v) => ShapeParameters.Set(e, i, v);
+
+    // ------------------------------------------------------------------ round trip
+
+    // Values Blender has no place for, kept in animated custom properties so that the Blender import can restore the
+    // elements exactly (see overbryce_import.py and BlenderSceneImporter.RoundTrip). They follow the channels above,
+    // so the indices of those stay as they were.
+
+    /// <summary>ob_ext: the alphas of the other colours, the modern surface values and a disk's sweep angle.</summary>
+    private static readonly Channel[] ExtChannels = PropChannels("ob_ext", 9);
+
+    /// <summary>ob_light: direction, colours, attenuation, spot, radius and whether it is on.</summary>
+    private static readonly Channel[] LightPropChannels = PropChannels("ob_light", 22);
+
+    /// <summary>ob_cam: field of view, aperture, focus, near and far clip.</summary>
+    private static readonly Channel[] CameraPropChannels = PropChannels("ob_cam", 5);
+
+    private static Channel[] PropChannels(string name, int count) =>
+        Enumerable.Range(0, count).Select(i => new Channel("prop", name, i)).ToArray();
+
+    private static float[] ExtValues(Element e) =>
+    [
+        e.Emission.A, e.Ambient.A, e.Specular.A, e.Reflectivity, e.RefractiveIndex, e.Glow, e.Roughness, e.Absorption,
+        e is DiskElement d ? (float)d.SweepAngle : 0,
+    ];
+
+    private static float[] LightPropValues(LightElement l) =>
+    [
+        l.Alpha, l.Beta, l.Gamma,
+        l.Diffuse.R, l.Diffuse.G, l.Diffuse.B, l.Diffuse.A,
+        l.Ambient.R, l.Ambient.G, l.Ambient.B, l.Ambient.A,
+        l.Specular.R, l.Specular.G, l.Specular.B, l.Specular.A,
+        (float)l.ConstantAttenuation, (float)l.LinearAttenuation, (float)l.QuadraticAttenuation,
+        (float)l.SpotCutoff, (float)l.SpotExponent, l.LightRadius, l.Enabled ? 1 : 0,
+    ];
+
+    /// <summary>
+    /// The static tag of an element's Blender object (custom property ob_tag): the element itself as .ani text (its
+    /// type, tessellation, texture, permanent motion and everything else that does not animate), the key states it is
+    /// in and stops at, its order among its siblings and the number of vertices its Blender mesh has.
+    /// </summary>
+    private string Tag(Track track, int vertices)
     {
-        switch (e)
+        var copy = track.First.Clone();
+        if (copy is GroupElement g) foreach (var c in g.Children.ToList()) g.Remove(c);
+        copy.MotionBoundary = false;
+        var holder = new Animation("tag");
+        var scene = new Scene("tag");
+        scene.Add(copy);
+        holder.Scenes.Add(scene);
+        var stops = track.States.Where(k => FindElement(_animation.Scenes[k], track.Path)?.MotionBoundary == true);
+        var tag = new Dictionary<string, object>
         {
-            case SphereElement s: s.Radius = v; break;
-            case ConeElement c when i == 0: c.BaseRadius = v; break;
-            case ConeElement c when i == 1: c.TopRadius = v; break;
-            case ConeElement c: c.Height = v; break;
-            case DiskElement d when i == 0: d.InnerRadius = v; break;
-            case DiskElement d: d.OuterRadius = v; break;
-            case BoxElement b when i == 0: b.SizeX = v; break;
-            case BoxElement b when i == 1: b.SizeY = v; break;
-            case BoxElement b: b.SizeZ = v; break;
-            case RectangleElement r when i == 0: r.SizeX = v; break;
-            case RectangleElement r: r.SizeY = v; break;
-            case TriangleElement t when i == 0: t.X1 = v; break;
-            case TriangleElement t when i == 1: t.Y1 = v; break;
-            case TriangleElement t when i == 2: t.X2 = v; break;
-            case TriangleElement t: t.Y2 = v; break;
-            case TorusElement t when i == 0: t.TubeRadius = v; break;
-            case TorusElement t: t.RingRadius = v; break;
-            case MeshElement m: m.Points[i] = v; break;
-        }
+            ["v"] = 1,
+            ["name"] = track.Name,
+            ["order"] = track.Index,
+            ["states"] = track.States.ToArray(),
+            ["stops"] = stops.ToArray(),
+            ["verts"] = vertices,
+            ["ani"] = AniFile.Serialize(holder),
+        };
+        // a texture that changes between key states (Blender shows the first one): the name in each
+        var textures = track.States.ToDictionary(k => k.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            k => FindElement(_animation.Scenes[k], track.Path)?.Texture ?? "");
+        if (textures.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1) tag["textures"] = textures;
+        return JsonSerializer.Serialize(tag);
     }
+
+    private static Element? FindElement(GroupElement root, string path)
+    {
+        Element? e = root;
+        foreach (var name in path.Split('/'))
+            e = (e as GroupElement)?.Children.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+        return e;
+    }
+
+    /// <summary>The animation without its elements (its settings and the key states' own values) as .ani text.</summary>
+    private string Skeleton()
+    {
+        var copy = AniFile.Parse(AniFile.Serialize(_animation));
+        foreach (var s in copy.Scenes)
+            foreach (var c in s.Children.ToList()) s.Remove(c);
+        return AniFile.Serialize(copy);
+    }
+
+    /// <summary>
+    /// The Blender frame that shows each key state: its time, or a moment earlier for a key state without a time of
+    /// its own (the next one starts at the same time; the value before a jump is keyed <see cref="JumpGap"/> earlier).
+    /// </summary>
+    private float[] KeyFrames() => _times.Select((t, k) =>
+        k + 1 < _times.Length && _times[k + 1] - t <= 0 && k > 0 ? Frame(t) - JumpGap : Frame(t)).ToArray();
 
     // ================================================================== tracks
 
@@ -711,6 +778,7 @@ internal sealed class BlenderExporter
                     bool offset = AllValues(track).Any(v => v[0] != 0 || v[1] != 0 || v[2] != 0);
                     json.WriteBoolean("inner", offset);
                     json.WriteString("rotation_mode", "ZYX");
+                    json.WriteString("tag", Tag(track, -1));
                     WriteCurves(track, Same, c => !offset && c < 3);
                     break;
                 }
@@ -720,6 +788,7 @@ internal sealed class BlenderExporter
                     json.WriteStartArray("clip");
                     json.WriteNumberValue(near); json.WriteNumberValue(far);
                     json.WriteEndArray();
+                    json.WriteString("tag", Tag(track, -1));
                     WriteCurves(track, Same);
                     break;
                 case Kind.Light:
@@ -757,6 +826,7 @@ internal sealed class BlenderExporter
                     float energy = (float)(4 * Math.PI * Math.PI * m * k);
                     json.WriteString("light", l.SpotCutoff > 90 ? "POINT" : "SPOT");
                     json.WriteNumber("radius", radius);
+                    json.WriteString("tag", Tag(track, -1));
                     if (all.Any(v => v[LightEnergy] < 0.5f)) _warnings.Add($"Light {track.Name} is switched off in some key states.");
                     WriteCurves(track, c => c switch
                     {
@@ -778,7 +848,7 @@ internal sealed class BlenderExporter
                     json.WriteBoolean("translucent", AllValues(track).Any(v => v[Transform.Length + 3] < 0.999f));
                     int shapeStart = Transform.Length + MaterialChannels.Length;
                     var values = AllValues(track).ToList();
-                    float[] p0 = values[0][shapeStart..];
+                    float[] p0 = values[0][shapeStart..(shapeStart + ShapeParams(e).Length)];
                     var ranges = new float[p0.Length];
                     for (int i = 0; i < p0.Length; i++)
                     {
@@ -805,8 +875,10 @@ internal sealed class BlenderExporter
                         if (variants.Count == 0) meshCache[cacheKey] = mesh;
                     }
                     json.WriteNumber("mesh", mesh.Id);
-                    WriteCurves(track, c => c >= shapeStart ? (ranges[c - shapeStart] > 0 ? v => (v - p0[c - shapeStart]) / ranges[c - shapeStart] : v => 0) : v => v,
-                        c => c >= shapeStart && ranges[c - shapeStart] == 0);
+                    json.WriteString("tag", Tag(track, mesh.VertCount));
+                    int shapeEnd = shapeStart + p0.Length;
+                    WriteCurves(track, c => c >= shapeStart && c < shapeEnd ? (ranges[c - shapeStart] > 0 ? v => (v - p0[c - shapeStart]) / ranges[c - shapeStart] : v => 0) : v => v,
+                        c => c >= shapeStart && c < shapeEnd && ranges[c - shapeStart] == 0);
                     break;
                 }
             }
@@ -816,6 +888,10 @@ internal sealed class BlenderExporter
 
         json.WriteStartObject("scene");
         WriteCurves(_scene, Same);
+        json.WriteString("settings", Skeleton());
+        json.WriteStartArray("keytimes");
+        foreach (float f in KeyFrames()) json.WriteNumberValue(f);
+        json.WriteEndArray();
         json.WriteEndObject();
 
         json.WriteStartArray("markers");

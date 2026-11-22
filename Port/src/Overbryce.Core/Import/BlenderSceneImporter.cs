@@ -84,8 +84,8 @@ public sealed partial class BlenderSceneImporter
         _nodes = file.Objects.Select((o, i) => new Node(i, o)).ToArray();
     }
 
-    private int FirstFrame => _file.Frames.Length > 0 ? _file.Frames[0] : _file.Scene.FrameStart;
-    private int LastFrame => _file.Frames.Length > 0 ? _file.Frames[^1] : FirstFrame;
+    private double FirstFrame => _file.Frames.Length > 0 ? _file.Frames[0] : _file.Scene.FrameStart;
+    private double LastFrame => _file.Frames.Length > 0 ? _file.Frames[^1] : FirstFrame;
 
     /// <summary>
     /// The imported animation, what was approximated or left out, and how the colours of the textures change to look
@@ -104,6 +104,7 @@ public sealed partial class BlenderSceneImporter
     {
         foreach (var note in _file.Notes) _report.AddScriptNote(note);
         LinkNodes();
+        if (!_options.Static) ReadTags();
         SampleFrames();
         BuildParts();
         DecideKept();
@@ -113,13 +114,19 @@ public sealed partial class BlenderSceneImporter
         BuildOutputTree();
         SampleOutputs();
 
-        var animation = new Animation(_options.Name ?? _file.Scene.Name);
-        ApplySettings(animation);
-        foreach (int f in KeyFrames())
-            animation.Scenes.Add(State(f));
+        Animation animation;
+        if (Restoring)
+            animation = RestoredAnimation();
+        else
+        {
+            animation = new Animation(_options.Name ?? _file.Scene.Name);
+            ApplySettings(animation);
+            foreach (int f in KeyFrames())
+                animation.Scenes.Add(State(f));
+        }
         ReportSummary(animation);
         Func<double, double, double, (double, double, double)>? textures = null;
-        if (_agx)
+        if (_agx && !Restoring)
         {
             double light = _typical;
             textures = (r, g, b) => SurfaceColor([FromSrgb(r), FromSrgb(g), FromSrgb(b)], true, light);
@@ -481,6 +488,12 @@ public sealed partial class BlenderSceneImporter
                 n.Kept = false;
                 return false;
             }
+            // restored elements (and the helpers of the export) are not made from the Blender object
+            if (_tags.ContainsKey(n))
+            {
+                n.Kept = false;
+                return false;
+            }
             n.Kept = any || n.Kind is NodeKind.Geometry or NodeKind.Light or NodeKind.Camera;
             if (!n.Kept && !n.Info.Instance && n.Info.Kind is "EMPTY" or "ARMATURE") emptyDropped++;
             return n.Kept;
@@ -554,11 +567,18 @@ public sealed partial class BlenderSceneImporter
 
     private void BuildOutputTree()
     {
-        foreach (var n in _nodes.Where(n => n.Parent == null && n.Kept)) Place(n, null, _roots);
+        // an object whose parent is not imported (a restored element of an Overbryce export) sits at the top
+        static bool KeptAbove(Node n)
+        {
+            for (var p = n.Parent; p != null; p = p.Parent)
+                if (p.Kept) return true;
+            return false;
+        }
+        foreach (var n in _nodes.Where(n => n.Kept && !KeptAbove(n))) Place(n, null, _roots);
         var top = _lights.Concat(_cameras).Concat(_roots).ToList();
-        Name(top);
+        Name(top, Restoring ? RestoredTopNames() : null);
         var w = _file.World;
-        if (w.Color.Length >= 3 && w.Color.Take(3).Max() * w.Strength > 1e-3)
+        if (!Restoring && w.Color.Length >= 3 && w.Color.Take(3).Max() * w.Strength > 1e-3)
         {
             _sky = "Sky";
             for (int i = 2; top.Any(o => string.Equals(o.Name, _sky, StringComparison.OrdinalIgnoreCase)); i++) _sky = "Sky_" + i;
@@ -605,9 +625,9 @@ public sealed partial class BlenderSceneImporter
         part.Material >= 0 && part.Material < _file.Materials.Count ? _file.Materials[part.Material].Name : $"{n.Info.Name}_{part.Slot + 1}";
 
     /// <summary>Overbryce names: at most 20 characters without spaces, unique among the elements of a group.</summary>
-    private static void Name(List<Out> siblings)
+    private static void Name(List<Out> siblings, HashSet<string>? taken = null)
     {
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var used = new HashSet<string>(taken ?? [], StringComparer.OrdinalIgnoreCase);
         foreach (var o in siblings)
         {
             string name = Element.SanitizeName(o.Name);
@@ -1042,7 +1062,11 @@ public sealed partial class BlenderSceneImporter
 
     private void ReportSummary(Animation a)
     {
-        foreach (var m in _file.Materials)
+        // the materials of restored elements do not matter: those take their colours from the export's properties
+        var converted = Restoring
+            ? AllOutputs().Where(o => o.Part != null).Select(o => o.Part!.Material).ToHashSet()
+            : Enumerable.Range(0, _file.Materials.Count).ToHashSet();
+        foreach (var m in _file.Materials.Where((_, i) => converted.Contains(i)))
         {
             foreach (var p in m.Procedural) _report.Approximate($"Material {m.Name}: the {p} from nodes is replaced by its plain value");
             foreach (var u in m.Unsupported) _report.Drop($"Material {m.Name}: {u}");
@@ -1071,6 +1095,6 @@ public sealed partial class BlenderSceneImporter
         if (_cameras.Count == 0) _report.Note("The scene has no camera.");
 
         int meshes = a.Scenes.SelectMany(s => s.Descendants()).OfType<PolyMeshElement>().Select(p => p.Data).Distinct().Count();
-        _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count()} elements ({_lights.Count} lights, {_cameras.Count} cameras), {meshes} polygon meshes, {_file.Textures.Count} textures.");
+        _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count() + _tags.Values.Count(t => t.Role == null)} elements ({_lights.Count} lights, {_cameras.Count} cameras), {meshes} polygon meshes, {_file.Textures.Count} textures.");
     }
 }

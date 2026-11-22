@@ -45,6 +45,12 @@ def log(text):
     print("Overbryce: " + text, flush=True)
 
 
+def set_frame(scene, frame):
+    """Goes to a frame, which may lie between two (the key states of an Overbryce export)."""
+    whole = int(math.floor(frame))
+    scene.frame_set(whole, subframe=float(frame) - whole)
+
+
 class Options:
     def __init__(self, argv):
         args = argv[argv.index("--") + 1:] if "--" in argv else []
@@ -647,9 +653,12 @@ def props_of(ob):
     for k in OVERBRYCE_PROPS:
         if k in ob.keys():
             v = ob[k]
+            if isinstance(v, str):
+                out[k] = v
+                continue
             try:
                 out[k] = [float(x) for x in v]
-            except TypeError:
+            except (TypeError, ValueError):
                 out[k] = float(v) if isinstance(v, (int, float)) else str(v)
     return out
 
@@ -685,6 +694,17 @@ def sample(scene, options, notes):
     frames = list(range(start, end + 1, max(1, scene.frame_step)))
     if not frames:
         frames = [scene.frame_current]
+    # a scene exported by Overbryce keeps the key states of the export: only their moments are sampled (they may fall
+    # between frames)
+    keytimes = scene.get("ob_keytimes")
+    if keytimes is not None and not options.static and not options.frames:
+        moments = {}
+        for k in keytimes:
+            k = float(k)
+            if start - 1e-4 <= k <= end + 1e-4:
+                moments.setdefault(round(k, 4), k)
+        if moments:
+            frames = [moments[k] for k in sorted(moments)]
     nf = len(frames)
     log("sampling %d frames (%d..%d)" % (nf, frames[0], frames[-1]))
 
@@ -694,7 +714,7 @@ def sample(scene, options, notes):
     first_shape, deforming, topology_changes = {}, set(), set()
     if nf > 1 and candidates:
         for f in probes:
-            scene.frame_set(f)
+            set_frame(scene, f)
             dg = bpy.context.evaluated_depsgraph_get()
             for ob in candidates:
                 co = mesh_positions(ob.evaluated_get(dg), dg)
@@ -763,7 +783,7 @@ def sample(scene, options, notes):
         return index
 
     for fi, frame in enumerate(frames):
-        scene.frame_set(frame)
+        set_frame(scene, frame)
         dg = bpy.context.evaluated_depsgraph_get()
         ptr_cache = {}
         camera_per_frame.append(scene.camera.name if scene.camera is not None else "")
@@ -807,6 +827,10 @@ def sample(scene, options, notes):
                     numeric = [k for k, v in p.items() if not isinstance(v, str)]
                     if numeric:
                         rec.props = {k: np.zeros((nf, len(p[k]) if isinstance(p[k], list) else 1), np.float32) for k in numeric}
+                    if "ob_tag" in p and not inst.is_instance:
+                        # the object's own animated values (exact, unlike a decomposed matrix): location, rotation, scale
+                        rec.props = rec.props or {}
+                        rec.props["_local"] = np.zeros((nf, 9), np.float32)
                 if not inst.is_instance and ob.original.name in deforming and rec.mesh >= 0:
                     rec.deform = {}
             if not inst.is_instance and not inst.show_self and ob.type in GEOMETRY:
@@ -821,6 +845,10 @@ def sample(scene, options, notes):
                 rec.data[fi] = light_numbers(ob.data) if ob.type == "LIGHT" else camera_numbers(ob.original, scene)
             if rec.props is not None:
                 for k, track in rec.props.items():
+                    if k == "_local":
+                        o_ = rec.original
+                        track[fi] = list(o_.location) + list(o_.rotation_euler) + list(o_.scale)
+                        continue
                     v = rec.original.get(k)
                     if v is not None:
                         try:
@@ -906,10 +934,13 @@ def scene_info(scene):
     for k in ("sc_amb", "sc_fogcol", "sc_fog", "sc_fogmode", "ob_settings", "ob_keytimes"):
         if k in scene.keys():
             v = scene[k]
+            if isinstance(v, str):
+                info["props"][k] = v
+                continue
             try:
                 info["props"][k] = [float(x) for x in v]
             except TypeError:
-                info["props"][k] = v if isinstance(v, str) else float(v)
+                info["props"][k] = float(v)
     return info
 
 
