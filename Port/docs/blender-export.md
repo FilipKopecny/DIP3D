@@ -36,6 +36,19 @@ The script was tested with Blender 4.2. For Lumina the export takes about a minu
 - **Lights.** Point lights and spot lights, with their animated colour, position, direction and switching on and off:
   - **Point lights that fade.** They use Blender's soft falloff, `1 / (d² + R²)`. This matches the original attenuation `1 / (c + l·d + q·d²)` exactly when there is no linear term, and closely otherwise.
   - **Spot lights and lights that do not fade.** In Cycles a light node gives them the original attenuation at every distance. EEVEE has only the physical falloff, so it is right at a reference distance: 3 units for a spot, the light's usual distance from the camera otherwise.
+- **Tags for the way back.** Since 2.4 the scene carries what [the import](blender-import.md#round-trip-scenes-exported-by-overbryce) needs to rebuild the animation:
+
+  | Property | Contents |
+  |---|---|
+  | `ob_tag` (object) | JSON: the element as `.ani` text, the key states it is in and stops at, its vertex count, and textures that change between states |
+  | `ob_ext` (object) | animated: the emission, ambient and specular alphas, reflectivity, refractive index, glow, roughness, absorption, a disk's sweep angle |
+  | `ob_light` (light) | animated: the direction, colours, attenuation, cutoff, exponent, light radius and switching on and off |
+  | `ob_cam` (camera) | animated: the field of view, aperture, focus and clip range |
+  | `ob_shape` (object) | animated: every shape parameter (radius, sizes, mesh points, …) |
+  | `ob_settings` (scene) | the animation's settings as `.ani` text, without elements |
+  | `ob_keytimes` (scene) | the Blender frame of every key state |
+
+  Group offsets and aim targets are empties tagged `{"role":"pos"}` or `{"role":"aim"}`.
 
 ## Render settings
 

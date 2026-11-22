@@ -1,4 +1,4 @@
-# Overbryce Animator 2.3
+# Overbryce Animator 2.4
 
 This is a key-frame 3D animation editor for current Windows, built on .NET 10 and OpenGL 3.3. It is a port of **Overbryce Animator 1.0**, written in 1998 by Tomáš Kopečný for the diploma thesis *Simulácia virtuálnej reality pomocou OpenGL – animácia scény*. The thesis was submitted at FEI STU Bratislava; the original program was built with Borland C++ Builder 3 and OpenGL 1.1.
 
@@ -67,10 +67,22 @@ The 3D view, the file format and the command line are unchanged.
 
 ![The editor in the dark theme with Lumina open](docs/images/editor-dark.png)
 
+### New in 2.4: import from Blender
+
+*File › Import › Blender scene…* (or `--import-blender` on the command line) turns a `.blend` file into an animation. Blender, run in the background, reads the evaluated scene frame by frame: after modifiers, geometry nodes, rigs and simulations. Overbryce then builds the animation from that:
+
+- **Geometry and hierarchy.** Meshes, curves and text become a new element type, the *polygon mesh*, stored in a `.meshes` file next to the `.ani`. Plain boxes and rectangles become Overbryce's own. Parents become groups.
+- **Materials, lights and cameras.** Principled materials become Phong colours and the modern values, with their image textures. Lights get a falloff fitted to Blender's. Cameras keep their lens, clipping, depth of field and cuts.
+- **World and settings.** The world becomes ambient light, a sky and fog. The render settings carry over.
+- **Motion.** It is fitted with as few key states as the spline needs to stay within a tolerance. Shape keys and deformations become morphing meshes.
+- **Report.** Whatever could only be approximated is listed in a report.
+
+A scene exported to Blender by Overbryce comes back as the elements it was made from, with the edits made in Blender. The 1998 samples and Lumina render the same after the round trip. See [Import from Blender](docs/blender-import.md).
+
 ## Features
 
 - **Elements:**
-  - Shapes: sphere, disk, ring or sector, truncated cone, box, rectangle, triangle, torus, and Bezier mesh (with 4 presets).
+  - Shapes: sphere, disk, ring or sector, truncated cone, box, rectangle, triangle, torus, Bezier mesh (with 4 presets), and polygon mesh (imported from Blender).
   - Spot and point lights (up to 8) and cameras (up to 8, one active).
   - Nested groups.
 - **Materials:** OpenGL material colours and shininess.
@@ -145,6 +157,7 @@ To share it, zip that folder. Before you publish again, close any copy of `Overb
 Overbryce.exe [file.ani] [--snapshot out.png] [--time seconds] [--view camera|front|side|top] [--wire] [--size WxH] [--modern|--classic] [--raytrace [--samples N] [--bounces N]]
 Overbryce.exe file.ani --frames folder [--from seconds] [--to seconds] [--view ...] [--wire] [--size WxH] [--modern|--classic] [--raytrace [--samples N] [--bounces N]]
 Overbryce.exe file.ani --blender folder [--no-blend]
+Overbryce.exe scene.blend --import-blender out.ani [--static] [--axis auto|yup|zup] [--tolerance 0.001]
 ```
 
 `--modern` and `--classic` choose the renderer. Without either, the animation's own setting (*Open in modern mode*) decides.
@@ -175,6 +188,12 @@ With `--blender`, it exports the animation to a Blender scene (`.blend`) and exi
 Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
 ```
 
+With `--import-blender`, it imports a Blender scene into an animation, writes the report next to it and exits. See [Import from Blender](docs/blender-import.md):
+
+```powershell
+Overbryce.exe LuminaBlender\Lumina.blend --import-blender LuminaBack\Lumina.ani
+```
+
 ## Using the editor
 
 | Action | Control |
@@ -195,6 +214,7 @@ Overbryce.exe Scenes\Lumina\Lumina.ani --blender LuminaBlender
 | Move an element to another group or state | Drag it in the tree (Ctrl+drag copies) |
 | Play or stop | F5, or drag the timeline slider |
 | Export frames | Ctrl+E (Esc cancels) |
+| Import a Blender scene | *File › Import › Blender scene…* (Esc cancels) |
 | Show controls | F1 |
 
 More about selection and the other tools:
@@ -219,6 +239,7 @@ More about selection and the other tools:
 | `tests/Overbryce.Raytrace.Tests` | xUnit tests: shape intersections, the BVH, the classic lighting, shadows, glass, textures, motion blur and depth of field |
 | `samples/Lumina` | The Lumina animation and its textures |
 | `tools/Lumina` | The generator that writes `samples/Lumina` through `Overbryce.Core` |
+| `tools/BlenderTest` | A Blender script that builds a test scene for the import, and a script that compares two renders |
 | `docs/` | Documentation |
 
 The model classes follow the original ones:
@@ -237,6 +258,7 @@ The model classes follow the original ones:
 - [docs/modern-rendering.md](docs/modern-rendering.md): the modern renderer, its settings and the new element properties.
 - [docs/raytracing.md](docs/raytracing.md): the ray tracer, its settings, the new element properties, and how it compares with the OpenGL renderers.
 - [docs/blender-export.md](docs/blender-export.md): exporting an animation to Blender.
+- [docs/blender-import.md](docs/blender-import.md): importing a Blender scene, the round trip, and what is approximated.
 - [docs/changes-from-1998.md](docs/changes-from-1998.md): bugs fixed in the port, behaviour that differs from the original, and what was kept on purpose.
 - [docs/port-overview.md](docs/port-overview.md): how the port was made, in brief.
 - [docs/thesis-evaluation.md](docs/thesis-evaluation.md): an evaluation of the 1998 thesis and its software, by the standards of its time.
