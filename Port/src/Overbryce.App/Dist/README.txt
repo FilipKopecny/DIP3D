@@ -1,8 +1,11 @@
-Overbryce Animator 2.2
+Overbryce Animator 2.3
 ======================
 
 A key-frame 3D animation editor: a port of Overbryce Animator 1.0 (1998) to .NET 10 and OpenGL 3.3.
 This build is self-contained: no .NET installation is needed.
+
+New in 2.3: the editor window has the Windows 11 look, with light and dark themes (View > Theme:
+follow Windows, light or dark) and new icons in place of the 1998 bitmap buttons.
 
 New in 2.2: a ray tracer for exported frames, snapshots and a preview (F9), with exact reflections,
 refracting glass, soft shadows, depth of field and motion blur. It runs on the processor, on all
@@ -11,7 +14,7 @@ cores.
 New in 2.1: a modern renderer next to the classic 1998 look, with shadows, reflections, glass,
 glow (bloom) and ambient occlusion.
 
-Files stay readable by the 1998 program and by 2.0 and 2.1.
+Files stay readable by the 1998 program and by 2.0, 2.1 and 2.2.
 
 Requirements: Windows 10 or 11 (x64) and a graphics card with OpenGL 3.3.
 
@@ -43,6 +46,7 @@ Drag the timeline                   preview any moment of the animation
 PgUp / PgDn                         previous / next key state (PgDn on the last one adds a new state)
 Ctrl+E                              export frames (File > Rendering settings: size, format,
                                     renderer)
+View > Theme                        light or dark window, or follow Windows
 F1                                  all controls
 
 
