@@ -451,8 +451,7 @@ def build(json_path, blend_path):
             cd = bpy.data.cameras.new(o["name"])
             cd.sensor_fit = "VERTICAL"
             cd.sensor_height = d["sensor_height"]
-            cd.clip_start = d["clip_start"]
-            cd.clip_end = d["clip_end"]
+            cd.clip_start, cd.clip_end = o.get("clip", (d["clip_start"], d["clip_end"]))
             ob = bpy.data.objects.new(o["name"], cd)
             collection.objects.link(ob)
         elif kind == "light":

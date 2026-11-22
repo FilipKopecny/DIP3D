@@ -40,6 +40,29 @@ public sealed class Animation
     [Browsable(false)]
     public List<string> UnknownExtensions { get; } = [];
 
+    /// <summary>The texture resolution of 1998: every bitmap is stretched to 128 × 128.</summary>
+    public const int ClassicTextureSize = 128;
+
+    /// <summary>
+    /// The resolution textures are stretched to (new in 2.4): 128 like the original, more for detailed textures such
+    /// as those of an imported Blender scene. Stored in the extension block when not 128.
+    /// </summary>
+    [Category("Animation"), DisplayName("Texture resolution"), Description("Textures are stretched to this many texels square: 128 like the original (1998), up to 4096 for detailed textures.")]
+    public int TextureSize
+    {
+        get;
+        set => field = ClampTextureSize(value);
+    } = ClassicTextureSize;
+
+    public static int ClampTextureSize(int size) => Math.Clamp(size, 16, 4096);
+
+    /// <summary>
+    /// The file next to the animation that holds the vertices of its polygon meshes (as read from or last saved to;
+    /// see <see cref="IO.MeshStore"/>).
+    /// </summary>
+    [Browsable(false)]
+    public string? MeshFile { get; set; }
+
     [Category("Animation"), DisplayName("Start time [s]")]
     public float StartTime => Scenes.Count > 0 ? Scenes[0].AniTime : 0;
 

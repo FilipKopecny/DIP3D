@@ -560,15 +560,15 @@ internal sealed class BlenderExporter
 
     // ================================================================== textures
 
-    /// <summary>Converts a texture like the renderer loads it: 128 x 128, pure white texels transparent.</summary>
-    private static void ConvertTexture(string source, string target)
+    /// <summary>Converts a texture like the renderer loads it: 128 x 128 (or the animation's texture size), pure white texels transparent.</summary>
+    private static void ConvertTexture(string source, string target, int size)
     {
-        const int size = 128;
         using var bitmap = new Bitmap(source);
         using var scaled = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(scaled))
         {
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.InterpolationMode = size > Animation.ClassicTextureSize && (bitmap.Width > size || bitmap.Height > size)
+                ? InterpolationMode.HighQualityBilinear : InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.DrawImage(bitmap, new Rectangle(0, 0, size, size));
         }
@@ -621,7 +621,7 @@ internal sealed class BlenderExporter
                 return -1;
             }
             string file = "textures/" + Path.GetFileNameWithoutExtension(key) + ".png";
-            ConvertTexture(source, Path.Combine(outputDirectory, file));
+            ConvertTexture(source, Path.Combine(outputDirectory, file), _animation.TextureSize);
             textureIndex[key] = textures.Count;
             textures.Add((key, file));
             return textures.Count - 1;
@@ -716,6 +716,10 @@ internal sealed class BlenderExporter
                 }
                 case Kind.Camera:
                     json.WriteString("rotation_mode", "ZXY");
+                    var (near, far) = ViewSetup.Clip((CameraElement)e);
+                    json.WriteStartArray("clip");
+                    json.WriteNumberValue(near); json.WriteNumberValue(far);
+                    json.WriteEndArray();
                     WriteCurves(track, Same);
                     break;
                 case Kind.Light:
@@ -864,6 +868,7 @@ internal sealed class BlenderExporter
         DiskElement d => $"{d.QualityX}x{d.QualityY}x{d.SweepAngle}",
         TorusElement t => $"{t.QualityX}x{t.QualityY}",
         MeshElement m => $"{m.CountX}x{m.CountY}x{m.QualityX}x{m.QualityY}",
+        PolyMeshElement p => p.MeshId ?? "",
         _ => "",
     };
 

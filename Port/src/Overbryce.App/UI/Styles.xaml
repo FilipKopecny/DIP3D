@@ -14,6 +14,7 @@
     <Geometry x:Key="Icon.Disk">M0.8,8.5 a7.2,3.6 0 1 0 14.4,0 a7.2,3.6 0 1 0 -14.4,0 M5.4,8.5 a2.6,1.25 0 1 0 5.2,0 a2.6,1.25 0 1 0 -5.2,0</Geometry>
     <Geometry x:Key="Icon.Cone">M5,3.5 a3,1.2 0 1 0 6,0 a3,1.2 0 1 0 -6,0 M5,3.5 L1.8,12.4 M11,3.5 L14.2,12.4 M1.8,12.4 a6.2,2.1 0 0 0 12.4,0</Geometry>
     <Geometry x:Key="Icon.Mesh">M1.5,4.5 C5,1.5 10,7.5 14.5,4.5 M1.5,8.5 C5,5.5 10,11.5 14.5,8.5 M1.5,12.5 C5,9.5 10,15.5 14.5,12.5 M1.5,4.5 V12.5 M6,4.1 V12.1 M10.2,4.9 V12.9 M14.5,4.5 V12.5</Geometry>
+    <Geometry x:Key="Icon.PolyMesh">M8,1.5 L14.5,5.5 L12.5,13.5 L3.5,13.5 L1.5,5.5 Z M8,1.5 L8,8 M1.5,5.5 L8,8 L14.5,5.5 M3.5,13.5 L8,8 L12.5,13.5</Geometry>
     <Geometry x:Key="Icon.Box">M8,1.5 L14,4.5 V11.5 L8,14.5 L2,11.5 V4.5 Z M2,4.5 L8,7.5 L14,4.5 M8,7.5 V14.5</Geometry>
     <Geometry x:Key="Icon.Rectangle">M1.5,3.5 H14.5 V12.5 H1.5 Z</Geometry>
     <Geometry x:Key="Icon.Triangle">M8,2 L14.8,13.5 H1.2 Z</Geometry>

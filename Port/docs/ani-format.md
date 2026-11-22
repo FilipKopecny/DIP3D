@@ -175,7 +175,22 @@ Element  := "Element"  state  path  key=value*
 | `Element` on a light | `lightRadius` (2.2) | float ≥ 0 | 0 | size of the light, for soft shadows |
 | `Element` on a camera | `aperture`, `focus` (2.2) | float ≥ 0, float ≥ 0.01 | 0, 10 | depth of field: lens size and focus distance |
 
+| `Element` on a camera | `near`, `far` (2.4) | float > 0 | 0.1, 100 | clipping distances (the original's fixed values) |
+| `Element` on a polygon mesh | `mesh` (2.4) | id | – | the mesh in the mesh file, see below |
+| `Textures` (2.4) | `size` | int 16..4096 | 128 | the resolution textures are stretched to (128 like the original) |
+| `Meshes` (2.4) | `file` | file name | `name.meshes` | the mesh file next to the animation |
+
 A key that belongs to another element type (`lightRadius` on a sphere, say) is kept and written back, but not applied.
+
+### Polygon meshes (2.4)
+
+Overbryce 2.4 adds a polygon mesh element: indexed triangles with a normal and texture coordinates per vertex, mostly made by the [Blender import](blender-import.md). Its vertices do not go into the text:
+
+- **In the original format** the element is an **empty group** (`Grupa name … Koniec_grupy`) with the element's name, placement and material. The 1998 program and Overbryce 2.0–2.3 open the file and see an empty group: they lose only the mesh.
+- **In the extension block** its `Element` record has `mesh=<id>`, which turns the empty group back into a polygon mesh. The id is 16 hex digits of a SHA-256 of the mesh's data, so equal meshes have equal ids.
+- **The vertices** are in a binary file next to the animation, `name.meshes` (named by the `Meshes` record; spaces become `_`). It starts with `OBMESH` and a version byte, followed by Deflate-compressed data: a list of arrays (float32 or int32, little-endian) and a list of meshes, each an id and the numbers of its position, normal, texture-coordinate, index and smoothing-group arrays. Arrays with the same content are stored once, so key states that share a mesh, or morph targets that share their triangles, cost little.
+
+Text would be slow for big meshes: Lumina's 37 MB of text already takes a while to read. Like textures, the mesh file must be copied with the animation. Without it the elements stay in the file, with their ids, but are not drawn. Versions 2.1–2.3 keep the `mesh` key and the `Meshes` record and write them back, so a file they edit still finds its meshes in 2.4 (unless they rename the empty group).
 
 ### Compatibility
 

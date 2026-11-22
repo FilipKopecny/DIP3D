@@ -427,11 +427,22 @@ public sealed class CameraElement : Element
     [Category("8 Camera"), DisplayName("Focus distance"), Description("Distance from the camera that is sharp when the aperture is above 0 (ray tracing only).")]
     public float Focus { get; set; } = DefaultFocus;
 
+    /// <summary>The clipping distances the original used for every camera.</summary>
+    public const float DefaultNear = 0.1f, DefaultFar = 100f;
+
+    [Category("8 Camera"), DisplayName("Clip start"), Description("Nearest distance from the camera that is drawn (0.1 in the original).")]
+    public float Near { get; set; } = DefaultNear;
+
+    [Category("8 Camera"), DisplayName("Clip end"), Description("Farthest distance from the camera that is drawn (100 in the original).")]
+    public float Far { get; set; } = DefaultFar;
+
     public override void Interpolate(in SplineWeights w, float time, Element prev, Element next, Element nextNext)
     {
         base.Interpolate(w, time, prev, next, nextNext);
         var p = (CameraElement)prev; var n = (CameraElement)next; var nn = (CameraElement)nextNext;
         FieldOfView = w.Interpolate(p.FieldOfView, FieldOfView, n.FieldOfView, nn.FieldOfView);
+        if (p.Near != Near || n.Near != Near || nn.Near != Near) Near = Math.Max(1e-4f, w.Interpolate(p.Near, Near, n.Near, nn.Near));
+        if (p.Far != Far || n.Far != Far || nn.Far != Far) Far = Math.Max(Near * 1.001f, w.Interpolate(p.Far, Far, n.Far, nn.Far));
         Aperture = Math.Max(0f, w.Interpolate(p.Aperture, Aperture, n.Aperture, nn.Aperture));
         if (Aperture <= NegligibleSurface) Aperture = 0f; // rounding of the spline, not a lens
         Focus = Math.Max(0.01f, w.Interpolate(p.Focus, Focus, n.Focus, nn.Focus));

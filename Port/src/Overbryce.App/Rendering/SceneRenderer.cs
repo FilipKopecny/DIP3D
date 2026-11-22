@@ -28,6 +28,9 @@ internal sealed class RenderOptions
 
     /// <summary>Multisampling of the modern renderer's frame (the classic one uses the target's own).</summary>
     public int Samples { get; init; } = 4;
+
+    /// <summary>The resolution textures are stretched to (<see cref="Animation.TextureSize"/>).</summary>
+    public int TextureSize { get; init; } = Animation.ClassicTextureSize;
 }
 
 /// <summary>Draws a <see cref="Scene"/> with OpenGL 3.3 core and finds the element under the mouse.</summary>
@@ -429,7 +432,7 @@ internal sealed partial class SceneRenderer : IDisposable
             Filled = !lines,
         };
         if (e.HasTexture && options.ResolveTexture(e.Texture!) is { } path)
-            cmd.Texture = Textures.Get(path);
+            cmd.Texture = Textures.Get(path, options.TextureSize);
         BuildShape(e, cmd.Ranges, lines);
         if (cmd.Ranges.Count > 0) _commands.Add(cmd);
 

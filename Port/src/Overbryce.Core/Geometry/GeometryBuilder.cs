@@ -76,7 +76,41 @@ public sealed class GeometryBuilder
             case MeshElement m:
                 BezierPatch(o, m.Points, m.CountX, m.CountY, m.QualityX, m.QualityY, lines);
                 break;
+            case PolyMeshElement p when p.Data != null:
+                PolyMesh(o, p.Data, lines);
+                break;
         }
+    }
+
+    // ---------------------------------------------------------------------------------- polygon mesh
+
+    /// <summary>The triangles of a polygon mesh (three vertices each), or its edges as lines.</summary>
+    public void PolyMesh(List<DrawRange> o, PolyMeshData mesh, bool lines)
+    {
+        var p = mesh.Positions;
+        var n = mesh.Normals;
+        var uv = mesh.Uvs;
+        var indices = lines ? mesh.Edges : mesh.Indices;
+        int needed = _floats + indices.Length * FloatsPerVertex;
+        if (needed > _data.Length)
+        {
+            int size = _data.Length;
+            while (size < needed) size *= 2;
+            Array.Resize(ref _data, size);
+        }
+        Begin(out int first);
+        var d = _data;
+        int k = _floats;
+        foreach (int v in indices)
+        {
+            d[k] = p[v * 3]; d[k + 1] = p[v * 3 + 1]; d[k + 2] = p[v * 3 + 2];
+            d[k + 3] = n[v * 3]; d[k + 4] = n[v * 3 + 1]; d[k + 5] = n[v * 3 + 2];
+            if (uv != null) { d[k + 6] = uv[v * 2]; d[k + 7] = uv[v * 2 + 1]; }
+            else { d[k + 6] = 0; d[k + 7] = 0; }
+            k += FloatsPerVertex;
+        }
+        _floats = k;
+        End(o, lines ? PrimitiveMode.Lines : PrimitiveMode.Triangles, first);
     }
 
     /// <summary>

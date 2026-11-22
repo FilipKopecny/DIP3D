@@ -17,6 +17,7 @@ public enum ElementType
     Camera,
     Group,
     Scene,
+    PolyMesh,
 }
 
 public enum DrawStyle
@@ -199,6 +200,31 @@ public abstract class Element
 
     /// <summary>Called on the shallow copy to duplicate reference-type state.</summary>
     protected virtual void CloneDeepParts() { }
+
+    /// <summary>
+    /// Copies everything an element of any type has (name, placement, material, texture, permanent motion and the
+    /// extension values) from <paramref name="source"/>, for example from the placeholder group of a polygon mesh.
+    /// </summary>
+    public void CopyCommonFrom(Element source)
+    {
+        Name = source.Name;
+        DrawStyle = source.DrawStyle;
+        Texture = source.Texture;
+        X = source.X; Y = source.Y; Z = source.Z;
+        Alpha = source.Alpha; Beta = source.Beta; Gamma = source.Gamma;
+        Specular = source.Specular; Diffuse = source.Diffuse; Ambient = source.Ambient; Emission = source.Emission;
+        Shininess = source.Shininess;
+        Reflectivity = source.Reflectivity; RefractiveIndex = source.RefractiveIndex; Glow = source.Glow;
+        CastsShadows = source.CastsShadows; Roughness = source.Roughness; Absorption = source.Absorption;
+        ExtensionData = source.ExtensionData != null ? new Dictionary<string, string>(source.ExtensionData, StringComparer.Ordinal) : null;
+        MotionBoundary = source.MotionBoundary;
+        MotionEnd = source.MotionEnd;
+        RotationAngleX = source.RotationAngleX; RotationAngleY = source.RotationAngleY; RotationAngleZ = source.RotationAngleZ;
+        RotationPeriod = source.RotationPeriod; RotationPermanent = source.RotationPermanent;
+        OrbitAngleX = source.OrbitAngleX; OrbitAngleY = source.OrbitAngleY; OrbitAngleZ = source.OrbitAngleZ;
+        OrbitPeriod = source.OrbitPeriod; OrbitPermanent = source.OrbitPermanent;
+        OrbitCenterX = source.OrbitCenterX; OrbitCenterY = source.OrbitCenterY; OrbitCenterZ = source.OrbitCenterZ;
+    }
 
     /// <summary>Uniform scaling of the element's size parameters (original: <c>Resize</c>).</summary>
     public virtual void Resize(float factor) { }

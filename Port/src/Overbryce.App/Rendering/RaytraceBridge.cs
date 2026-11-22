@@ -15,6 +15,7 @@ internal sealed class RaytraceBridge(Func<string, string?> resolveTexture)
 {
     private readonly Raytracer _tracer = new();
     private readonly Dictionary<string, TextureImage?> _textures = new(StringComparer.OrdinalIgnoreCase);
+    private int _textureSize = Animation.ClassicTextureSize;
 
     /// <summary>Compiles one frame for tracing (on the thread that owns the animation).</summary>
     /// <param name="scene">The state to show (a key state or an evaluated frame).</param>
@@ -23,6 +24,11 @@ internal sealed class RaytraceBridge(Func<string, string?> resolveTexture)
         int width, int height, bool alphaBlend, bool classic, RaytraceSettings settings, uint seed)
     {
         scene ??= new Scene();
+        if (animation.TextureSize != _textureSize)
+        {
+            _textures.Clear();
+            _textureSize = animation.TextureSize;
+        }
         var steps = new List<FrameStep>();
         if (time is float t && !classic && settings.Shutter > 0 && animation.Scenes.Count > 1)
         {
@@ -58,8 +64,10 @@ internal sealed class RaytraceBridge(Func<string, string?> resolveTexture)
         if (mode == ViewMode.Camera)
         {
             if (scene?.ActiveCamera is { } cam)
-                return new CameraSetup(Transforms.CameraView(cam), Math.Clamp(cam.FieldOfView, 1f, 179f), ViewSetup.Near, ViewSetup.Far,
-                    cam.Aperture, cam.Focus);
+            {
+                var (near, far) = ViewSetup.Clip(cam);
+                return new CameraSetup(Transforms.CameraView(cam), Math.Clamp(cam.FieldOfView, 1f, 179f), near, far, cam.Aperture, cam.Focus);
+            }
             editor = new EditorCamera();
             editor.Reset(ViewMode.Front);
         }
@@ -74,7 +82,7 @@ internal sealed class RaytraceBridge(Func<string, string?> resolveTexture)
         try
         {
             if (resolveTexture(name) is { } path)
-                image = new TextureImage(TextureCache.LoadPixels(path), TextureCache.Size);
+                image = new TextureImage(TextureCache.LoadPixels(path, _textureSize), _textureSize);
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or OutOfMemoryException or ExternalException)
         {

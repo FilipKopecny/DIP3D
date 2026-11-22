@@ -156,6 +156,7 @@ internal sealed partial class MainWindow : Window
                     View = view,
                     Projection = proj,
                     ResolveTexture = ResolveTexture,
+                TextureSize = _animation.TextureSize,
                     Modern = (req.Modern ?? _animation.Modern.Enabled) ? _animation.Modern : null,
                     Samples = 8,
                 }, req.Size.Width, req.Size.Height);
@@ -487,6 +488,7 @@ internal sealed partial class MainWindow : Window
                 View = view,
                 Projection = proj,
                 ResolveTexture = ResolveTexture,
+                TextureSize = _animation.TextureSize,
                 Modern = _modernView ? _animation.Modern : null,
                 Samples = 4,
             }, w, h);
@@ -567,6 +569,7 @@ internal sealed partial class MainWindow : Window
                 View = view,
                 Projection = proj,
                 ResolveTexture = ResolveTexture,
+                TextureSize = _animation.TextureSize,
             }, w, h, location.X, location.Y, _gl.LogicalToDeviceUnits(4));
 
             // while previewing, the picture is an in-between copy of the key state the interval
@@ -1503,6 +1506,7 @@ internal sealed partial class MainWindow : Window
                         View = view,
                         Projection = proj,
                         ResolveTexture = ResolveTexture,
+                TextureSize = _animation.TextureSize,
                         Modern = modern ? _animation.Modern : null,
                         Samples = _settings.Antialias ? 8 : 0,
                     }, size.Width, size.Height);

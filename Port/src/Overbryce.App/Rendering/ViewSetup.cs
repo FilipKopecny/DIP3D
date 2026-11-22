@@ -66,8 +66,15 @@ internal sealed class EditorCamera
 
 internal static class ViewSetup
 {
-    public const float Near = 0.1f;
-    public const float Far = 100f;
+    public const float Near = CameraElement.DefaultNear;
+    public const float Far = CameraElement.DefaultFar;
+
+    /// <summary>A camera's clipping distances (0.1 and 100 unless set, as in the original).</summary>
+    public static (float Near, float Far) Clip(CameraElement cam)
+    {
+        float near = Math.Max(1e-4f, cam.Near);
+        return (near, Math.Max(near * 1.001f, cam.Far));
+    }
 
     /// <summary>
     /// Computes the view and projection matrices. In camera mode the state's active camera is used
@@ -84,7 +91,10 @@ internal static class ViewSetup
         {
             var cam = scene?.ActiveCamera;
             if (cam != null)
-                return (Transforms.CameraView(cam), Transforms.Perspective(Math.Clamp(cam.FieldOfView, 1f, 179f), aspect, Near, Far));
+            {
+                var (near, far) = Clip(cam);
+                return (Transforms.CameraView(cam), Transforms.Perspective(Math.Clamp(cam.FieldOfView, 1f, 179f), aspect, near, far));
+            }
             warning = "No active camera in this state - showing the front view.";
             var front = new EditorCamera();
             front.Reset(ViewMode.Front);

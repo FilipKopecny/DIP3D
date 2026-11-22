@@ -17,9 +17,54 @@ public static class AniFile
 
     public static Encoding LegacyEncoding => Encoding.GetEncoding(1250);
 
-    public static Animation Load(string path) => Parse(File.ReadAllText(path, LegacyEncoding));
+    /// <summary>Reads an animation, with the vertices of its polygon meshes from the mesh file next to it.</summary>
+    public static Animation Load(string path)
+    {
+        var animation = Parse(File.ReadAllText(path, LegacyEncoding));
+        if (PolyMeshes(animation).Any(m => m.Data == null && m.MeshId != null))
+        {
+            string dir = Path.GetDirectoryName(Path.GetFullPath(path))!;
+            var candidates = new List<string>();
+            if (animation.MeshFile != null) candidates.Add(Path.Combine(dir, Path.GetFileName(animation.MeshFile)));
+            candidates.Add(Path.ChangeExtension(Path.GetFullPath(path), MeshStore.Extension));
+            if (candidates.FirstOrDefault(File.Exists) is { } meshFile)
+                ResolveMeshes(animation, MeshStore.Read(meshFile));
+        }
+        return animation;
+    }
 
-    public static void Save(Animation animation, string path) => File.WriteAllText(path, Serialize(animation), LegacyEncoding);
+    /// <summary>
+    /// Writes an animation; the vertices of its polygon meshes go to <c>name.meshes</c> next to it (only when it has
+    /// any, so other files are written exactly as before).
+    /// </summary>
+    public static void Save(Animation animation, string path)
+    {
+        var meshes = PolyMeshes(animation).Select(m => m.Data).OfType<PolyMeshData>().ToList();
+        if (meshes.Count > 0)
+        {
+            string meshFile = Path.GetFileNameWithoutExtension(path).Replace(' ', '_') + MeshStore.Extension;
+            MeshStore.Write(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, meshFile), meshes);
+            animation.MeshFile = meshFile;
+        }
+        File.WriteAllText(path, Serialize(animation), LegacyEncoding);
+    }
+
+    /// <summary>Every polygon mesh element of every key state.</summary>
+    public static IEnumerable<PolyMeshElement> PolyMeshes(Animation animation) =>
+        animation.Scenes.SelectMany(s => s.Descendants()).OfType<PolyMeshElement>();
+
+    /// <summary>Gives the polygon meshes that refer to a mesh by id their data; returns the number still missing.</summary>
+    public static int ResolveMeshes(Animation animation, IReadOnlyDictionary<string, PolyMeshData> meshes)
+    {
+        int missing = 0;
+        foreach (var m in PolyMeshes(animation))
+        {
+            if (m.Data != null || m.MeshId == null) continue;
+            if (meshes.TryGetValue(m.MeshId, out var data)) m.Data = data;
+            else missing++;
+        }
+        return missing;
+    }
 
     public static Animation Parse(string text)
     {

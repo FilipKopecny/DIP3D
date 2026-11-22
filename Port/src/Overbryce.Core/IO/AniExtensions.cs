@@ -101,6 +101,16 @@ public static class AniExtensions
         .. ElementKeys,
         FloatKey<Element>("aperture", e => ((CameraElement)e).Aperture, (e, v) => ((CameraElement)e).Aperture = Math.Max(0f, v), 0f),
         FloatKey<Element>("focus", e => ((CameraElement)e).Focus, (e, v) => ((CameraElement)e).Focus = Math.Max(0.01f, v), CameraElement.DefaultFocus),
+        FloatKey<Element>("near", e => ((CameraElement)e).Near, (e, v) => ((CameraElement)e).Near = Math.Max(1e-4f, v), CameraElement.DefaultNear),
+        FloatKey<Element>("far", e => ((CameraElement)e).Far, (e, v) => ((CameraElement)e).Far = Math.Max(1e-3f, v), CameraElement.DefaultFar),
+    ];
+
+    private const string MeshKey = "mesh";
+
+    private static readonly Key<Element>[] PolyMeshKeys =
+    [
+        .. ElementKeys,
+        new(MeshKey, e => ((PolyMeshElement)e).MeshId ?? "", (e, v) => ((PolyMeshElement)e).SetMeshId(v), e => ((PolyMeshElement)e).MeshId == null),
     ];
 
     /// <summary>The keys of an element; a key that does not belong to its type is kept as unknown.</summary>
@@ -108,8 +118,15 @@ public static class AniExtensions
     {
         LightElement => LightKeys,
         CameraElement => CameraKeys,
+        PolyMeshElement => PolyMeshKeys,
         _ => ElementKeys,
     };
+
+    /// <summary>Record of the file that holds the polygon meshes (2.4): <c>Meshes file=name.meshes ;</c>.</summary>
+    private const string MeshesRecord = "Meshes";
+
+    /// <summary>Record of the texture resolution (2.4): <c>Textures size=1024 ;</c>.</summary>
+    private const string TexturesRecord = "Textures";
 
     // ------------------------------------------------------------------ reading
 
@@ -160,10 +177,34 @@ public static class AniExtensions
                 ApplyKeys(record.Skip(1), animation.Raytrace, RaytraceKeys, animation.Raytrace.Unknown);
                 return;
 
+            case MeshesRecord:
+                foreach (string token in record.Skip(1))
+                    if (token.StartsWith("file=", StringComparison.Ordinal) && token.Length > 5)
+                        animation.MeshFile = token[5..];
+                return;
+
+            case TexturesRecord:
+                foreach (string token in record.Skip(1))
+                    if (token.StartsWith("size=", StringComparison.Ordinal) && int.TryParse(token[5..], NumberStyles.Integer, Inv, out int size))
+                        animation.TextureSize = Animation.ClampTextureSize(size);
+                return;
+
             case ElementRecord when record.Count >= 3
                                     && int.TryParse(record[1], NumberStyles.Integer, Inv, out int state)
                                     && state >= 0 && state < animation.Scenes.Count
-                                    && Find(animation.Scenes[state], record[2]) is { } element:
+                                    && Find(animation.Scenes[state], record[2]) is { } found:
+                var element = found;
+                // a polygon mesh is stored as an empty group (what older versions see); its record makes it a mesh again
+                if (element is GroupElement { Parent: { } parent } placeholder and not Scene && placeholder.Children.Count == 0
+                    && record.Skip(3).Any(t => t.StartsWith(MeshKey + "=", StringComparison.Ordinal)))
+                {
+                    var mesh = new PolyMeshElement();
+                    mesh.CopyCommonFrom(placeholder);
+                    int index = parent.IndexOf(placeholder);
+                    parent.Remove(placeholder);
+                    parent.Insert(index, mesh);
+                    element = mesh;
+                }
                 element.ExtensionData ??= new Dictionary<string, string>(StringComparer.Ordinal);
                 ApplyKeys(record.Skip(3), element, KeysOf(element), element.ExtensionData);
                 if (element.ExtensionData.Count == 0) element.ExtensionData = null;
@@ -225,6 +266,11 @@ public static class AniExtensions
         foreach (var (name, value) in animation.Raytrace.Unknown)
             raytrace.Append(' ').Append(name).Append('=').Append(value);
         if (raytrace.Length > 0) records.Add(RaytraceRecord + raytrace);
+
+        if (animation.TextureSize != Animation.ClassicTextureSize)
+            records.Add($"{TexturesRecord} size={animation.TextureSize.ToString(Inv)}");
+        if (animation.MeshFile != null && animation.Scenes.Any(s => s.Descendants().Any(e => e is PolyMeshElement)))
+            records.Add($"{MeshesRecord} file={animation.MeshFile.Replace(' ', '_')}");
 
         for (int s = 0; s < animation.Scenes.Count; s++)
             WriteElements(animation.Scenes[s], s.ToString(Inv), "", records);

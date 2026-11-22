@@ -84,4 +84,21 @@ public readonly struct SplineWeights
 
     public double Interpolate(double p1, double p2, double p3, double p4)
         => Interpolate((float)p1, (float)p2, (float)p3, (float)p4);
+
+    /// <summary>
+    /// The weights of p1..p4 in <see cref="Interpolate(float, float, float, float)"/>, which is linear in them: the
+    /// result is <c>w1 p1 + w2 p2 + w3 p3 + w4 p4</c>. Used to blend whole arrays (the vertices of a polygon mesh)
+    /// with one set of weights, and to turn such a blend into Blender shape keys.
+    /// </summary>
+    public (float W1, float W2, float W3, float W4) Coefficients()
+    {
+        float w1 = 0, w2 = C2, w3 = C3, w4 = 0;
+        // h1 = p3 (ease) or (1 - r) p2 + r p1
+        if (EaseStart) w3 += C1;
+        else { w1 += Ratio2312 * C1; w2 += (1 - Ratio2312) * C1; }
+        // h4 = p2 (ease) or (1 - s) p3 + s p4
+        if (EaseEnd) w2 += C4;
+        else { w3 += (1 - Ratio2334) * C4; w4 += Ratio2334 * C4; }
+        return (w1, w2, w3, w4);
+    }
 }

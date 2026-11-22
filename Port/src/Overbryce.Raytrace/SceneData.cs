@@ -274,7 +274,8 @@ internal sealed class GeometryCache
 }
 
 /// <summary>The identity of a piece of geometry: the type and the shape parameters after the scale is taken out.</summary>
-internal readonly record struct ShapeKey(ElementType Type, double A, double B, double C, int Q1, int Q2, bool Smooth, MeshKey? Mesh = null);
+internal readonly record struct ShapeKey(ElementType Type, double A, double B, double C, int Q1, int Q2, bool Smooth, MeshKey? Mesh = null,
+    PolyMeshData? Poly = null);
 
 /// <summary>The control points of a Bezier mesh as a key.</summary>
 internal sealed class MeshKey : IEquatable<MeshKey>
@@ -578,6 +579,11 @@ internal static class SceneCompiler
 
             case MeshElement m:
                 return (new ShapeKey(ElementType.Mesh, m.CountX, m.CountY, 0, m.QualityX, m.QualityY, false, new MeshKey(m.Points)), Matrix4x4.Identity);
+
+            case PolyMeshElement p:
+                // the data is immutable and shared by all the frames that show it, so it is its own key
+                if (p.Data == null || p.Data.TriangleCount == 0) return null;
+                return (new ShapeKey(ElementType.PolyMesh, 0, 0, 0, 0, 0, false, Poly: p.Data), Matrix4x4.Identity);
         }
         return null;
     }
@@ -627,6 +633,10 @@ internal static class SceneCompiler
                 break;
             case ElementType.Mesh:
                 g.BezierPatch(ranges, MeshPoints(k), (int)k.A, (int)k.B, k.Q1, k.Q2, false);
+                break;
+            case ElementType.PolyMesh:
+                g.PolyMesh(ranges, k.Poly!, false);
+                solid = k.Poly!.IsClosed;
                 break;
         }
         return new TriangleMesh(g.Data, ranges, solid);
