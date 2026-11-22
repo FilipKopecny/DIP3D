@@ -312,6 +312,14 @@ class MaterialReader:
         if out is None:
             return m
         shader, _ = linked_from(out.inputs["Surface"])
+        nodes = mat.node_tree.nodes
+        if any(n.type == "ATTRIBUTE" and n.attribute_name == "ob_dif" for n in nodes):
+            # a material of the Overbryce export: the colours are the object's (ob_dif ...), only its image matters
+            m["shader"] = "overbryce"
+            image = next((n for n in nodes if n.type == "TEX_IMAGE" and n.image is not None), None)
+            if image is not None:
+                m["texture"] = self.textures.add(image.image, True, self.notes)
+            return m
         self._shader(shader, m, 1.0)
         if out.inputs.get("Displacement") is not None and out.inputs["Displacement"].is_linked:
             m["unsupported"].append("displacement")

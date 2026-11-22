@@ -16,6 +16,47 @@ public class BlenderImportTests
     /// <summary>Blender's Z up as Overbryce's Y up: (x, y, z) â†’ (x, z, -y).</summary>
     private static Vector3 ToYUp(Vector3 v) => new(v.X, v.Z, -v.Y);
 
+    /// <summary>The cubes of these tests stay polygon meshes (they are about placement, not about shapes).</summary>
+    private static BlenderImportOptions AsMeshes => new() { RecognizeShapes = false };
+
+    [Fact]
+    public void A_plain_cube_and_plane_become_a_box_and_a_rectangle()
+    {
+        var s = new SyntheticBlenderScene();
+        s.AddObject("Cube", "MESH", Matrix4x4.CreateScale(1, 2, 3), mesh: s.AddCube());
+        Vector3[] plane = [new(-1, -1, 0), new(1, -1, 0), new(1, 1, 0), new(-1, 1, 0)];
+        s.AddObject("Plane", "MESH", Matrix4x4.Identity, mesh: s.AddMesh(plane, [0, 1, 2, 0, 2, 3]));
+        Vector3[] offCentre = [.. CubeCorners.Select(v => v + new Vector3(3, 0, 0))];
+        s.AddObject("Moved", "MESH", Matrix4x4.Identity, mesh: s.AddMesh(offCentre,
+            [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6, 5, 3, 0, 4, 3, 4, 7]));
+
+        var state = BlenderSceneImporter.Import(s.Build()).Animation.Scenes[0];
+
+        var box = Assert.IsType<BoxElement>(state.FindChild("Cube"));
+        Assert.Equal(new Vector3(2, 4, 6), new Vector3(box.SizeX, box.SizeY, box.SizeZ));
+        var rect = Assert.IsType<RectangleElement>(state.FindChild("Plane"));
+        Assert.Equal(2f, rect.SizeX);
+        Assert.IsType<PolyMeshElement>(state.FindChild("Moved"));   // not centred: stays a polygon mesh
+    }
+
+    [Fact]
+    public void A_mesh_a_rig_moves_as_a_whole_moves_by_its_placement()
+    {
+        const int frames = 25;
+        var s = new SyntheticBlenderScene(frames);
+        int obj = s.AddObject("Arm", "MESH", Matrix4x4.Identity, mesh: s.AddCube());
+        // an armature modifier turning every vertex about Z and lifting it: the mesh deforms, but rigidly
+        s.Deform(obj, f => CubeCorners.Select(v => Vector3.Transform(v, Matrix4x4.CreateRotationZ(f * 0.05f) * Matrix4x4.CreateTranslation(0, 0, f * 0.1f))).ToArray());
+
+        var (animation, report, _) = BlenderSceneImporter.Import(s.Build(), AsMeshes);
+
+        var meshes = animation.Scenes.Select(k => (PolyMeshElement)k.FindChild("Arm")!).ToList();
+        Assert.All(meshes, m => Assert.Same(meshes[0].Data, m.Data));   // one mesh, no morph
+        var last = meshes[^1];
+        AssertSameVertices(CubeCorners.Select(v => ToYUp(Vector3.Transform(v, Matrix4x4.CreateRotationZ((frames - 1) * 0.05f) * Matrix4x4.CreateTranslation(0, 0, (frames - 1) * 0.1f)))), WorldVertices(last));
+        Assert.Contains(report.Info, l => l.Contains("moved by a rig"));
+    }
+
     private static Matrix4x4 Deg(float x, float y, float z) =>
         Matrix4x4.CreateRotationX(x * MathF.PI / 180) * Matrix4x4.CreateRotationY(y * MathF.PI / 180) * Matrix4x4.CreateRotationZ(z * MathF.PI / 180);
 
@@ -133,7 +174,7 @@ public class BlenderImportTests
         s.AddObject("Cube", "MESH", local * parentWorld, root, cube);
         s.AddObject("Loose empty", "EMPTY", Matrix4x4.Identity);
 
-        var (animation, report, _) = BlenderSceneImporter.Import(s.Build(), new BlenderImportOptions());
+        var (animation, report, _) = BlenderSceneImporter.Import(s.Build(), AsMeshes);
         var state = Assert.Single(animation.Scenes);
         var group = Assert.IsType<GroupElement>(Assert.Single(state.Children));
         Assert.Equal("Rig_Root", group.Name);
@@ -149,7 +190,7 @@ public class BlenderImportTests
     {
         var s = new SyntheticBlenderScene();
         s.AddObject("Mirror", "MESH", Matrix4x4.CreateScale(-1, 1, 1) * Matrix4x4.CreateTranslation(5, 0, 0), mesh: s.AddCube());
-        var mesh = (PolyMeshElement)BlenderSceneImporter.Import(s.Build()).Animation.Scenes[0].Children.Single();
+        var mesh = (PolyMeshElement)BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation.Scenes[0].Children.Single();
         var world = Transforms.World(mesh);
         var center = Vector3.Transform(Vector3.Zero, world);
         for (int i = 0; i < mesh.Data!.VertexCount; i++)
@@ -169,7 +210,7 @@ public class BlenderImportTests
         s.AddCamera("Cam", Deg(90, 0, 0) * Matrix4x4.CreateTranslation(0, -10, 0), 40, 0.5f, 250);
         s.AddObject("Box", "MESH", Matrix4x4.Identity, mesh: s.AddCube());
         s.Cameras.Add("Cam");
-        var state = BlenderSceneImporter.Import(s.Build()).Animation.Scenes[0];
+        var state = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation.Scenes[0];
 
         var lamp = state.Lights.Single();
         Assert.True(Vector3.Distance(new Vector3(0, 5, 0), new Vector3(lamp.X, lamp.Y, lamp.Z)) < 1e-5f);
@@ -197,7 +238,7 @@ public class BlenderImportTests
         s.AddObject("Cube A", "MESH", Matrix4x4.Identity, mesh: cube);
         s.AddObject("Cube_A", "MESH", Matrix4x4.CreateTranslation(3, 0, 0), mesh: cube);
         s.AddObject("A rather long object name", "MESH", Matrix4x4.CreateTranslation(6, 0, 0), mesh: cube);
-        var names = BlenderSceneImporter.Import(s.Build()).Animation.Scenes[0].Children.Select(c => c.Name).ToList();
+        var names = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation.Scenes[0].Children.Select(c => c.Name).ToList();
         Assert.Equal(["Cube_A", "Cube_A_2", "A_rather_long_object"], names);
     }
 
@@ -209,7 +250,7 @@ public class BlenderImportTests
         int glow = s.AddMaterial("Glow", [0, 0, 0], emission: [1, 0.5, 0.1], emissionStrength: 10);
         int mesh = s.AddMesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], [0, 1, 2, 1, 3, 2], [0, 1], [red, glow]);
         s.AddObject("Two", "MESH", Matrix4x4.Identity, mesh: mesh);
-        var group = Assert.IsType<GroupElement>(BlenderSceneImporter.Import(s.Build()).Animation.Scenes[0].Children.Single());
+        var group = Assert.IsType<GroupElement>(BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation.Scenes[0].Children.Single());
         Assert.Equal(["Red_metal", "Glow"], group.Children.Select(c => c.Name).ToList());
         var metal = (PolyMeshElement)group.Children[0];
         Assert.Equal(1, metal.TriangleCount);
@@ -226,7 +267,7 @@ public class BlenderImportTests
     {
         var s = new SyntheticBlenderScene { WorldColor = [0.05, 0.05, 0.2] };
         s.AddObject("Box", "MESH", Matrix4x4.Identity, mesh: s.AddCube());
-        var state = BlenderSceneImporter.Import(s.Build()).Animation.Scenes[0];
+        var state = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation.Scenes[0];
         var sky = Assert.IsType<SphereElement>(state.FindChild("Sky"));
         Assert.False(sky.CastsShadows);
         Assert.True(sky.Emission.B > sky.Emission.R);
@@ -241,14 +282,14 @@ public class BlenderImportTests
         int cube = s.AddCube();
         s.AddObject("Mover", "MESH", [Matrix4x4.CreateTranslation(0, 0, 0), Matrix4x4.CreateTranslation(1, 0, 0), Matrix4x4.CreateTranslation(2, 0, 0)], mesh: cube);
         s.AddObject("Blink", "MESH", [Matrix4x4.Identity], mesh: cube, visible: [true, false, true]);
-        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        var animation = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation;
         Assert.Equal(24, animation.Fps);
         Assert.Equal(2 / 24f, animation.EndTime, 5);
         Assert.Equal(1, animation.Evaluate(1 / 24f)!.FindChild("Mover")!.X, 3);
         Assert.Null(animation.Evaluate(1 / 24f)!.FindChild("Blink"));
         Assert.NotNull(animation.Evaluate(2 / 24f)!.FindChild("Blink"));
 
-        var still = BlenderSceneImporter.Import(s.Build(), new BlenderImportOptions { Static = true }).Animation;
+        var still = BlenderSceneImporter.Import(s.Build(), new BlenderImportOptions { Static = true, RecognizeShapes = false }).Animation;
         Assert.Single(still.Scenes);
     }
 
@@ -277,7 +318,7 @@ public class BlenderImportTests
             return Deg(0, 0, 360 * t) * Matrix4x4.CreateTranslation(4 * MathF.Sin(3 * t), 2 * t, t * t);
         }).ToArray();
         s.AddObject("Spinner", "MESH", path, mesh: s.AddCube());
-        var options = new BlenderImportOptions { Tolerance = 0.001 };
+        var options = new BlenderImportOptions { Tolerance = 0.001, RecognizeShapes = false };
         var animation = BlenderSceneImporter.Import(s.Build(), options).Animation;
         Assert.InRange(animation.Scenes.Count, 3, frames / 3);
         double worst = WorstMeshError(animation, "Spinner", f => CubeCorners.Select(v => ToYUp(Vector3.Transform(v, path[f]))).ToList(), frames);
@@ -291,7 +332,7 @@ public class BlenderImportTests
         var s = new SyntheticBlenderScene(frames);
         var path = Enumerable.Range(0, frames).Select(f => Matrix4x4.CreateTranslation(f < 15 ? 0.1f * f : 10 + 0.1f * f, 0, 0)).ToArray();
         s.AddObject("Teleport", "MESH", path, mesh: s.AddCube());
-        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        var animation = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation;
         var times = animation.Scenes.Select(k => (int)MathF.Round(k.AniTime * 24)).ToList();
         Assert.Contains(14, times);
         Assert.Contains(15, times);
@@ -309,7 +350,7 @@ public class BlenderImportTests
         s.AddCamera("B", Matrix4x4.CreateTranslation(5, -10, 0), 40);
         s.AddObject("Box", "MESH", Matrix4x4.Identity, mesh: s.AddCube());
         for (int f = 0; f < frames; f++) s.Cameras.Add(f < 12 ? "A" : "B");
-        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        var animation = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation;
         for (int f = 0; f < frames; f++)
             Assert.Equal(f < 12 ? "A" : "B", animation.Evaluate(f / 24f)!.ActiveCamera!.Name);
     }
@@ -324,7 +365,7 @@ public class BlenderImportTests
         int obj = s.AddObject("Wave", "MESH", Matrix4x4.Identity, mesh: mesh);
         Vector3[] At(int f) => flat.Select((v, i) => i == 3 ? v + new Vector3(0, 0, MathF.Sin(f / 10f)) : v).ToArray();
         s.Deform(obj, At);
-        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        var animation = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation;
         Assert.True(animation.Scenes.Count < frames);
         double worst = WorstMeshError(animation, "Wave", f => At(f).Select(ToYUp).ToList(), frames);
         Assert.True(worst < 0.01, $"strays {worst}");

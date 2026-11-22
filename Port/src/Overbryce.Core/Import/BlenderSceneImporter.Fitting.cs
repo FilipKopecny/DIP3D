@@ -202,9 +202,15 @@ public sealed partial class BlenderSceneImporter
             }
             default:
             {
+                // a shape of its own (a box, a rectangle): its place and where its axes point, a scene size out
                 var tw = Transforms.ElementLocal(t) * truthParent;
                 var ew = Transforms.ElementLocal(e) * evaluatedParent;
-                worst = Vector3.Distance(tw.Translation, ew.Translation) / tolerance;
+                foreach (var p in new[] { Vector3.Zero, Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ })
+                {
+                    var q = p * (float)_radius;
+                    worst = Math.Max(worst, Vector3.Distance(Vector3.Transform(q, tw), Vector3.Transform(q, ew)) / tolerance);
+                }
+                worst = Math.Max(worst, SurfaceError(t, e));
                 break;
             }
         }

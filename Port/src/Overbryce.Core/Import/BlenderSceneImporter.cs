@@ -36,6 +36,9 @@ public sealed class BlenderImportOptions
     /// millimetre in a scene of a metre). Key states are added where it strays further. 0: every frame is a key state.
     /// </summary>
     public double Tolerance { get; set; } = 0.001;
+
+    /// <summary>Plain boxes and rectangles become Overbryce's own shapes (off: every mesh is a polygon mesh).</summary>
+    public bool RecognizeShapes { get; set; } = true;
 }
 
 /// <summary>
@@ -320,6 +323,7 @@ public sealed partial class BlenderSceneImporter
                 n.Stretch[f] = s;
                 if (n.Reference < 0 && n.Visible[f]) n.Reference = f;
             }
+            FoldRigidDeformation(n);
             if (n.Reference < 0) n.Reference = Array.IndexOf(n.Valid, true);
             if (n.Reference >= 0)
             {
@@ -963,7 +967,7 @@ public sealed partial class BlenderSceneImporter
         }
         else
         {
-            var mesh = new PolyMeshElement(o.Name, MeshAt(o.Node, o.Part!, f));
+            var mesh = Primitive(o) ?? new PolyMeshElement(o.Name, MeshAt(o.Node, o.Part!, f));
             SurfaceOf(o.Part!.Material, f).ApplyTo(mesh);
             int tex = o.Part.Material >= 0 && o.Part.Material < _file.Materials.Count ? _file.Materials[o.Part.Material].Texture : -1;
             if (tex >= 0 && tex < _file.Textures.Count) mesh.Texture = _file.Textures[tex].File;
@@ -1094,6 +1098,10 @@ public sealed partial class BlenderSceneImporter
             _report.Drop($"{over - LightElement.MaxPerScene} of {over} lights in some frames (Overbryce has 8: the brightest are kept per key state)");
         if (_cameras.Count == 0) _report.Note("The scene has no camera.");
 
+        if (_rigid > 0)
+            _report.Note($"{_rigid} mesh{(_rigid == 1 ? "" : "es")} moved by a rig as a whole: the motion became {(_rigid == 1 ? "its" : "their")} placement.");
+        if (_boxes + _rectangles > 0)
+            _report.Note($"Recognised {_boxes} box{(_boxes == 1 ? "" : "es")} and {_rectangles} rectangle{(_rectangles == 1 ? "" : "s")} (Overbryce's own shapes instead of polygon meshes).");
         int meshes = a.Scenes.SelectMany(s => s.Descendants()).OfType<PolyMeshElement>().Select(p => p.Data).Distinct().Count();
         _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count() + _tags.Values.Count(t => t.Role == null)} elements ({_lights.Count} lights, {_cameras.Count} cameras), {meshes} polygon meshes, {_file.Textures.Count} textures.");
     }

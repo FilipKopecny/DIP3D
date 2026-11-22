@@ -119,7 +119,7 @@ public class BlenderRoundTripTests
         Assert.Equal(45, light.SpotCutoff, 5);
         Assert.Equal(0.2f, light.LightRadius, 5);
 
-        Assert.IsType<PolyMeshElement>(a.Scenes[0].FindChild("Added"));
+        Assert.IsType<BoxElement>(a.Scenes[0].FindChild("Added"));
     }
 
     [Fact]
