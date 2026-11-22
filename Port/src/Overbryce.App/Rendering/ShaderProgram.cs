@@ -8,8 +8,11 @@ internal sealed class ShaderProgram : IDisposable
 {
     public const int MaxLights = 8;
 
-    /// <summary>At most this many lights cast shadows at a time (one shadow cube map each).</summary>
-    public const int MaxShadowLights = 4;
+    /// <summary>
+    /// At most this many lights cast shadows at a time (one shadow cube map each): all the lights
+    /// OpenGL had. The cube maps take texture units 3..10 of the 16 that OpenGL 3.3 guarantees.
+    /// </summary>
+    public const int MaxShadowLights = 8;
 
     private readonly int _program;
     private readonly Dictionary<string, int> _locations = new();
@@ -170,14 +173,24 @@ internal static class SceneShader
         uniform sampler2D uAoTex;
         uniform vec2 uViewport;
         uniform float uAoDirect;             // share of the occlusion applied to direct light
-        uniform int uShadowSlot[8];          // per light: -1 none, else 0..3
+        uniform int uShadowSlot[8];          // per light: -1 none, else 0..7
         uniform samplerCubeShadow uShadow0;
         uniform samplerCubeShadow uShadow1;
         uniform samplerCubeShadow uShadow2;
         uniform samplerCubeShadow uShadow3;
-        uniform float uShadowFar[4];
+        uniform samplerCubeShadow uShadow4;
+        uniform samplerCubeShadow uShadow5;
+        uniform samplerCubeShadow uShadow6;
+        uniform samplerCubeShadow uShadow7;
+        uniform float uShadowFar[8];
         uniform float uShadowSize;           // texels per cube face
         uniform float uShadowSoftness;
+        uniform int uShadowFocus[8];         // per shadow slot: layer of its focused map, -1 none
+        uniform mat4 uShadowFocusMat[8];     // world -> clip space of the focused map
+        uniform float uShadowFocusTan[8];    // tan of half its field of view
+        uniform vec4 uShadowFocusSphere;     // the region the focused maps cover: centre, radius
+        uniform float uShadowFocusSize;      // texels per side
+        uniform sampler2DArrayShadow uShadowFocusMap;
         uniform vec3 uShadowLightPos;        // pass 3: the light the depth is measured from
         uniform float uShadowLightFar;       // pass 3
         uniform bool uEnvOn;
@@ -203,7 +216,27 @@ internal static class SceneShader
             if (slot == 0) return texture(uShadow0, c);
             if (slot == 1) return texture(uShadow1, c);
             if (slot == 2) return texture(uShadow2, c);
-            return texture(uShadow3, c);
+            if (slot == 3) return texture(uShadow3, c);
+            if (slot == 4) return texture(uShadow4, c);
+            if (slot == 5) return texture(uShadow5, c);
+            if (slot == 6) return texture(uShadow6, c);
+            return texture(uShadow7, c);
+        }
+
+        // the focused map of a distant light: 12 taps in a disk of 2.5 texels
+        float focusedShadow(int slot, int layer, vec3 lightPos, vec3 Nl, float dist, float far)
+        {
+            float texel = 2.0 * dist * uShadowFocusTan[slot] / uShadowFocusSize;
+            vec3 p = vWorldPos + Nl * texel * 1.5;                 // normal offset against acne
+            vec4 c = uShadowFocusMat[slot] * vec4(p, 1.0);
+            vec2 uv = c.xy / c.w * 0.5 + 0.5;
+            float ref = (length(p - lightPos) - texel) / far;
+            float r = max(uShadowSoftness, 0.0) * 2.5 / uShadowFocusSize;
+            if (r <= 0.0) return texture(uShadowFocusMap, vec4(uv, float(layer), ref));
+            float sum = 0.0;
+            for (int k = 0; k < 12; k++)
+                sum += texture(uShadowFocusMap, vec4(uv + Disk[k] * r, float(layer), ref));
+            return sum / 12.0;
         }
 
         // fraction of the light reaching this point (soft edge from 12 taps around the direction)
@@ -213,21 +246,37 @@ internal static class SceneShader
             vec3 d = vWorldPos - lightPos;
             float dist = length(d);
             if (dist >= far || dist < 1e-4) return 1.0;
-            float texel = 2.0 * dist / uShadowSize;               // size of a shadow-map texel here
             vec3 Nl = dot(N, d) <= 0.0 ? N : -N;                   // the side facing the light
+
+            // a distant light near the camera: its focused map, blended into the cube map at the edge
+            float w = 0.0, focused = 1.0;
+            int layer = uShadowFocus[slot];
+            if (layer >= 0)
+            {
+                w = 1.0 - smoothstep(0.85 * uShadowFocusSphere.w, uShadowFocusSphere.w, length(vWorldPos - uShadowFocusSphere.xyz));
+                if (w > 0.0) focused = focusedShadow(slot, layer, lightPos, Nl, dist, far);
+                if (w >= 1.0) return focused;
+            }
+
+            float texel = 2.0 * dist / uShadowSize;               // size of a shadow-map texel here
             vec3 p = vWorldPos + Nl * texel * 1.5;                 // normal offset against acne
             vec3 dir = p - lightPos;
             float dd = length(dir);
-            vec3 w = dir / dd;
+            vec3 dw = dir / dd;
             float ref = (dd - texel) / far;
-            vec3 t = normalize(cross(w, abs(w.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-            vec3 b = cross(w, t);
+            vec3 t = normalize(cross(dw, abs(dw.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+            vec3 b = cross(dw, t);
             float r = max(uShadowSoftness, 0.0) * 2.5 * texel / dd;
-            if (r <= 0.0) return shadowTap(slot, vec4(w, ref));
-            float sum = 0.0;
-            for (int k = 0; k < 12; k++)
-                sum += shadowTap(slot, vec4(w + (t * Disk[k].x + b * Disk[k].y) * r, ref));
-            return sum / 12.0;
+            float cube;
+            if (r <= 0.0) cube = shadowTap(slot, vec4(dw, ref));
+            else
+            {
+                float sum = 0.0;
+                for (int k = 0; k < 12; k++)
+                    sum += shadowTap(slot, vec4(dw + (t * Disk[k].x + b * Disk[k].y) * r, ref));
+                cube = sum / 12.0;
+            }
+            return mix(cube, focused, w);
         }
 
         void main()

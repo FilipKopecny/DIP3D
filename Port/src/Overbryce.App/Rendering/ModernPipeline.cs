@@ -240,6 +240,21 @@ internal sealed class ModernPipeline : IDisposable
 
     public CubeTarget? ShadowIfAny(int slot) => _shadows[slot];
 
+    /// <summary>The focused shadow maps of distant lights: <paramref name="layers"/> depth layers of <paramref name="size"/>².</summary>
+    public FocusTarget Focus(int layers, int size)
+    {
+        if (_focus == null || _focus.Size != size || _focus.Layers < layers)
+        {
+            _focus?.Dispose();
+            _focus = new FocusTarget(Math.Max(layers, _focus?.Layers ?? 0), size);
+        }
+        return _focus;
+    }
+
+    public FocusTarget? FocusIfAny => _focus;
+
+    private FocusTarget? _focus;
+
     /// <summary>The colour cube map of reflection probe <paramref name="index"/>.</summary>
     public CubeTarget Probe(int index, int size)
     {
@@ -335,6 +350,7 @@ internal sealed class ModernPipeline : IDisposable
     {
         DisposeFrame();
         foreach (var s in _shadows) s?.Dispose();
+        _focus?.Dispose();
         foreach (var p in _probes) p.Dispose();
         _probes.Clear();
         GL.DeleteTexture(_noise);
@@ -498,6 +514,59 @@ internal sealed class ModernPipeline : IDisposable
                 fragColor = vec4(sum / 16.0);
             }
             """;
+    }
+}
+
+/// <summary>
+/// A 2D depth texture array with a framebuffer per layer: the focused shadow maps of distant lights,
+/// each one a perspective view from the light that covers only the part of the scene near the camera.
+/// </summary>
+internal sealed class FocusTarget : IDisposable
+{
+    private readonly int[] _fbo;
+
+    public int Size { get; }
+    public int Layers { get; }
+    public int Texture { get; }
+
+    public FocusTarget(int layers, int size)
+    {
+        Size = size;
+        Layers = layers;
+        Texture = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2DArray, Texture);
+        GL.TexImage3D(TextureTarget.Texture2DArray, 0, PixelInternalFormat.DepthComponent24, size, size, layers, 0,
+            PixelFormat.DepthComponent, PixelType.Float, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureCompareMode, (int)TextureCompareMode.CompareRefToTexture);
+        GL.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureCompareFunc, (int)DepthFunction.Lequal);
+
+        _fbo = new int[layers];
+        for (int l = 0; l < layers; l++)
+        {
+            _fbo[l] = GL.GenFramebuffer();
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo[l]);
+            GL.FramebufferTextureLayer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, Texture, 0, l);
+            GL.DrawBuffer(DrawBufferMode.None);
+            GL.ReadBuffer(ReadBufferMode.None);
+            ModernPipeline.Check("Focused shadow");
+        }
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    public void BindLayer(int layer)
+    {
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo[layer]);
+        GL.Viewport(0, 0, Size, Size);
+    }
+
+    public void Dispose()
+    {
+        foreach (int f in _fbo) GL.DeleteFramebuffer(f);
+        GL.DeleteTexture(Texture);
     }
 }
 

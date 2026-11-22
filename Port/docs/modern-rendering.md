@@ -50,7 +50,7 @@ Every shape has a new category in the property grid, *9 Modern rendering*. The c
 | General | Open in modern mode | off | Show the animation in modern mode when it is opened |
 | | Exposure | 1 | Brightness before the highlights are compressed. 1 matches the classic brightness |
 | Bloom | On, Strength, Threshold | on, 0.5, 0.9 | Bright parts glow. The threshold is the brightness where the glow starts |
-| Shadows | On, Softness, Lights with shadows, Map size | on, 1, 4, 1024 | Soft shadow edge width; up to 4 lights; resolution of a shadow-map face |
+| Shadows | On, Softness, Lights with shadows, Map size | on, 1, 8, 1024 | Soft shadow edge width; up to 8 lights; resolution of a shadow-map face (a distant light's focused map has twice that) |
 | Ambient occlusion | On, Radius, Strength | on, 0.5, 1 | Darker creases and contacts. Radius is in scene units |
 | Reflections | On, Probes, Probe size | on, 4, 256 | Reflections and glass. Probes is how many elements get their own view of the surroundings per frame |
 
@@ -58,8 +58,9 @@ Every shape has a new category in the property grid, *9 Modern rendering*. The c
 
 The code is in `src/Overbryce.App/Rendering`: `SceneRenderer.Modern.cs` and `ModernPipeline.cs`. The lighting shader is shared with the classic renderer, in `ShaderProgram.cs`.
 
-1. **Shadow maps.** Up to four lights with *Casts shadows* are chosen per frame. They are ranked by brightness × attenuation at the camera, so the lights that matter in the shot win.
+1. **Shadow maps.** Up to eight lights with *Casts shadows* are chosen per frame (*Lights with shadows*, 8 by default: all the lights OpenGL had). They are ranked by brightness × attenuation at the camera, so the lights that matter in the shot win.
    - Each chosen light renders a cube map of distances. A spot light skips the cube faces outside its cone.
+   - A cube map spreads its texels over all directions, so for a light far from the shot (a sun 50 units away) they are coarse where the camera looks: about 0.1 units with 1024 texels a face, too coarse for the shadow of a character half a unit across. So the part of the scene the camera sees is fitted with a sphere: the view frustum from the near plane to the depth that holds 90 % of the visible lit elements (stars and a sky around the camera do not count). A light more than 1.5 radii from its centre also renders a *focused map*: one perspective view (twice *Map size*, at most 4096) from the light, just wide enough for the sphere. Inside the sphere the shader uses the focused map, and it blends into the cube map over the outer 15 % of the radius.
    - The lighting shader samples it with 12-tap percentage-closer filtering and a normal offset. The edge width grows with *Softness* and with the distance from the light.
 2. **Reflection probes.** The elements with reflectivity or glass that are largest on screen each get a cube map of their surroundings, drawn from their centre without themselves (up to *Probes*). Other reflecting elements use the nearest probe. The probes are drawn with lighting and shadows but without reflections, so there is one bounce.
 3. **Ambient occlusion.** Normals and depth of the opaque elements are drawn first. Screen-space ambient occlusion (16 samples in a hemisphere, 4×4 noise, blurred) darkens creases and contacts. It is applied fully to ambient light and at 40 % to direct light.
@@ -88,9 +89,10 @@ Turning off reflections, or lowering *Probes* or *Probe size*, is the main way t
   - Glass refracts once and shows the surroundings, not other glass behind it.
   - The [ray tracer](raytracing.md) (version 2.2) renders exact reflections and refraction for exported frames, snapshots and a preview.
 - **Shadows** come from point lights. Their softness is a filter width, not the size of a real light, so the edge does not widen with the distance from the occluder. Half-transparent elements either cast a full shadow (opacity 0.5 or more) or none, and glass casts none. White-transparent texture parts do let the light through.
-  - A light inside a glowing element (a sun, a bulb) takes that element's size. Elements less than half that size cast no shadow from it; as a point, the light would make a small element next to a sun throw a huge shadow across a planet. The [ray tracer](raytracing.md) lightens such shadows by how much of the glowing body they hide instead.
+  - A light inside a glowing element (a sun, a bulb) takes that element's size; a glowing element with unlit elements inside it (a sky, a halo) does not count. An element smaller than the light casts no shadow from it when its umbra, r·d/(R−r), is shorter than eight of its radii. As a point, the light would make a small element next to a sun throw a huge shadow across a planet, while a character in sunshine keeps its shadow. The [ray tracer](raytracing.md) lightens such shadows by how much of the glowing body they hide instead.
+  - Shadows outside the focus sphere of a distant light come from its cube map, so small elements far from the camera may lose their shadows there.
 - **Ambient occlusion** sees only what is on screen, so occluders outside the picture do not darken anything.
-- **More than four lights:** only the four most important lights cast shadows; the others light the scene without shadows.
+- **More than eight lights:** OpenGL lights only the first eight lights of a scene anyway; *Lights with shadows* below 8 leaves the less important ones without shadows.
 
 ## Compatibility
 

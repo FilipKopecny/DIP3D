@@ -54,7 +54,7 @@ public static class AniExtensions
         FloatKey<ModernSettings>("bloomThreshold", s => s.BloomThreshold, (s, v) => s.BloomThreshold = v, 0.9f),
         BoolKey<ModernSettings>("shadows", s => s.Shadows, (s, v) => s.Shadows = v, true),
         FloatKey<ModernSettings>("shadowSoftness", s => s.ShadowSoftness, (s, v) => s.ShadowSoftness = v, 1f),
-        IntKey<ModernSettings>("shadowLights", s => s.ShadowLights, (s, v) => s.ShadowLights = v, 4),
+        IntKey<ModernSettings>("shadowLights", s => s.ShadowLights, (s, v) => s.ShadowLights = v, 8),
         IntKey<ModernSettings>("shadowMapSize", s => s.ShadowMapSize, (s, v) => s.ShadowMapSize = v, 1024),
         BoolKey<ModernSettings>("ao", s => s.AmbientOcclusion, (s, v) => s.AmbientOcclusion = v, true),
         FloatKey<ModernSettings>("aoRadius", s => s.AoRadius, (s, v) => s.AoRadius = v, 0.5f),

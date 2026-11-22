@@ -320,6 +320,7 @@ internal static class SceneCompiler
         var textures = new Dictionary<string, TextureImage?>(StringComparer.OrdinalIgnoreCase);
         var instances = new List<Instance>();
         var fixtures = new List<(Vector3 Center, float Size)>();
+        var unlit = new List<Vector3>(); // centres of the elements that do not glow
         int triangles = 0;
 
         void Visit(Element e, Matrix4x4 parentWorld, string path)
@@ -382,8 +383,11 @@ internal static class SceneCompiler
                 MathF.Max(half.Y * new Vector3(refWorld.M21, refWorld.M22, refWorld.M23).Length(),
                     half.Z * new Vector3(refWorld.M31, refWorld.M32, refWorld.M33).Length()));
             if (!float.IsFinite(size)) size = 0;
-            if (size > 0 && MathF.Max(mat.Emission.X, MathF.Max(mat.Emission.Y, mat.Emission.Z)) * mat.Glow >= 0.5f)
-                fixtures.Add((center, size));
+            if (MathF.Max(mat.Emission.X, MathF.Max(mat.Emission.Y, mat.Emission.Z)) * mat.Glow >= 0.5f)
+            {
+                if (size > 0) fixtures.Add((center, size));
+            }
+            else unlit.Add(center);
 
             instances.Add(new Instance
             {
@@ -404,16 +408,18 @@ internal static class SceneCompiler
         Visit(reference, Matrix4x4.Identity, "");
 
         // The body of a point light: the smallest glowing element centred on it (the modern renderer's
-        // rule). Elements less than half its size cast no shadow from it: as a point, the light would
-        // make a small element near a sun throw a huge hard shadow across the scene, where a light of
-        // the sun's real size leaves only a faint penumbra. A light with a radius of its own is sampled
-        // as an area light instead, which gives that penumbra.
+        // rule). An element that looks smaller than the body hides only part of it (ShadowVisitor): as
+        // a point, the light would make a small element near a sun throw a huge hard shadow across the
+        // scene, where a light of the sun's real size leaves only a faint penumbra. A glowing element
+        // with unlit elements inside it is a sky, a halo or a room around the light, not its body. A
+        // light with a radius of its own is sampled as an area light instead, which gives that penumbra.
         for (int i = 0; i < lights.Length; i++)
         {
             if (lights[i].Radius > 0) continue;
             float best = 0;
             foreach (var (c, size) in fixtures)
-                if (Vector3.Distance(c, lights[i].Position) <= 0.5f * size && (best == 0 || size < best))
+                if (Vector3.Distance(c, lights[i].Position) <= 0.5f * size && (best == 0 || size < best)
+                    && !unlit.Any(u => Vector3.Distance(u, c) < size))
                     best = size;
             lights[i].Fixture = best;
         }

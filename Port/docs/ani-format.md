@@ -156,7 +156,7 @@ Element  := "Element"  state  path  key=value*
 | `Modern` | `enabled` | 0/1 | 0 | open the animation in modern mode |
 | | `exposure` | float | 1 | brightness before tone mapping |
 | | `bloom`, `bloomStrength`, `bloomThreshold` | 0/1, float, float | 1, 0.5, 0.9 | glow of bright parts |
-| | `shadows`, `shadowSoftness`, `shadowLights`, `shadowMapSize` | 0/1, float, int, int | 1, 1, 4, 1024 | shadow maps |
+| | `shadows`, `shadowSoftness`, `shadowLights`, `shadowMapSize` | 0/1, float, int, int | 1, 1, 8, 1024 | shadow maps (`shadowLights` was 0..4 with default 4 in 2.1 and 2.2, which read a missing key as 4 and clamp higher values to 4) |
 | | `ao`, `aoRadius`, `aoStrength` | 0/1, float, float | 1, 0.5, 1 | ambient occlusion |
 | | `reflections`, `probes`, `probeSize` | 0/1, int, int | 1, 4, 256 | reflection probes |
 | `Raytrace` (2.2) | `samples` | int 1..4096 | 16 | samples per pixel |

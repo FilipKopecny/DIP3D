@@ -197,7 +197,7 @@ public class RenderTests
     {
         // a pebble next to a sun-like light: as a point light, its shadow on the ground is a hard
         // black disk; the glowing body around the light is much bigger, so the shadow nearly vanishes
-        var pebble = new SphereElement("Pebble") { X = 3.4f, Z = 3.4f, Radius = 0.15 };
+        var pebble = new SphereElement("Pebble") { X = 3.1f, Z = 3.1f, Radius = 0.15 }; // just outside the sun
         var sun = new SphereElement("Sun")
         {
             X = 4, Z = 4, Radius = 1,
@@ -213,6 +213,22 @@ public class RenderTests
         int nearPoint = Gray(Render(ShadowScene(Block()), Settings()), InShadow);
         int nearBody = Gray(Render(With(Ground(), Block(), sun, Lamp(4, 0, 4)), Settings()), InShadow);
         Assert.Equal(nearPoint, nearBody);
+    }
+
+    [Fact]
+    public void A_glowing_sky_around_the_scene_is_not_a_light_body()
+    {
+        // the light is well inside a glowing sky sphere, but so is everything else: the sky is not the
+        // light's body, and the pebble keeps its full shadow
+        var pebble = new SphereElement("Pebble") { X = 3.1f, Z = 3.1f, Radius = 0.15 };
+        var sky = new SphereElement("Sky")
+        {
+            Radius = 50,
+            Ambient = Black, Diffuse = Black, Specular = Black, Emission = new Rgba(1, 1, 1, 1),
+        };
+        int point = Gray(Render(ShadowScene(pebble), Settings()), Vector3.Zero);
+        int withSky = Gray(Render(With(Ground(), pebble, sky, Lamp(4, 0, 4)), Settings()), Vector3.Zero);
+        Assert.Equal(point, withSky);
     }
 
     // ------------------------------------------------------------------------------------------ surfaces

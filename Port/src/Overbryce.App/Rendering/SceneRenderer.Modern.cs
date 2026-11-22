@@ -7,7 +7,8 @@ namespace Overbryce.App.Rendering;
 /// <summary>
 /// The modern renderer (new in 2.1). One frame is drawn in these passes:
 /// <list type="number">
-/// <item>shadow cube maps of the most important lights (the distance from the light per texel);</item>
+/// <item>shadow cube maps of the most important lights (the distance from the light per texel), plus a
+/// focused 2D map for each distant light that covers only the part of the scene the camera sees;</item>
 /// <item>reflection probes: cube maps of the surroundings of the most visible reflecting elements;</item>
 /// <item>normals and depth of the opaque elements, turned into screen-space ambient occlusion;</item>
 /// <item>the scene in HDR (multisampled), lit like the classic renderer plus glow, shadows, occlusion
@@ -21,6 +22,7 @@ internal sealed partial class SceneRenderer
     private const int AoUnit = 1;
     private const int EnvUnit = 2;
     private const int ShadowUnit = 3;
+    private const int FocusUnit = ShadowUnit + ShaderProgram.MaxShadowLights; // 11
     private const float ShadowNear = 0.02f;
     private const float ProbeNear = 0.05f;
     private const float MaxRange = 100f;
@@ -57,12 +59,14 @@ internal sealed partial class SceneRenderer
         SetupFog(scene, options);
 
         // 1. shadows
-        var slots = RenderShadows(s, camera);
+        var slots = RenderShadows(s, camera, options);
         for (int i = 0; i < ShaderProgram.MaxLights; i++)
             _shader.Set($"uShadowSlot[{i}]", i < slots.Length ? slots[i] : -1);
         for (int k = 0; k < ShaderProgram.MaxShadowLights; k++)
             if (_modern.ShadowIfAny(k) is { } cube)
                 BindUnit(ShadowUnit + k, TextureTarget.TextureCubeMap, cube.Texture);
+        if (_modern.FocusIfAny is { } focus)
+            BindUnit(FocusUnit, TextureTarget.Texture2DArray, focus.Texture);
 
         // 2. reflection probes
         bool env = s.Reflections && RenderProbes(s, camera, frustum, options) > 0;
@@ -144,8 +148,13 @@ internal sealed partial class SceneRenderer
 
     // ==================================================================================== shadows
 
-    /// <summary>Renders the shadow maps; returns for each uploaded light its shadow slot or -1.</summary>
-    private int[] RenderShadows(ModernSettings s, Vector3 camera)
+    /// <summary>
+    /// Renders the shadow maps; returns for each uploaded light its shadow slot or -1. Every chosen
+    /// light gets a cube map. A light far from the part of the scene the camera sees (a sun) also gets
+    /// a focused map: a perspective view from the light that covers only that part, so its texels are
+    /// many times smaller there than the cube map's.
+    /// </summary>
+    private int[] RenderShadows(ModernSettings s, Vector3 camera, RenderOptions options)
     {
         var slots = Enumerable.Repeat(-1, _lights.Count).ToArray();
         if (!s.Shadows || s.ShadowLights <= 0 || _modern == null) return slots;
@@ -165,12 +174,26 @@ internal sealed partial class SceneRenderer
         AssignSamplerUnits(depth);
         // the shadow maps being drawn must not be bound for sampling at the same time
         for (int k = 0; k < ShaderProgram.MaxShadowLights; k++) BindUnit(ShadowUnit + k, TextureTarget.TextureCubeMap, 0);
+        BindUnit(FocusUnit, TextureTarget.Texture2DArray, 0);
         GL.Disable(EnableCap.Blend);
         GL.Disable(EnableCap.PolygonOffsetFill);
         GL.Enable(EnableCap.DepthTest);
         GL.DepthFunc(DepthFunction.Lequal);
         GL.DepthMask(true);
         GL.BindVertexArray(_vao);
+
+        // the distant lights: outside the focus region with some margin
+        var region = FocusRegion(options, camera);
+        var layerOf = Enumerable.Repeat(-1, ShaderProgram.MaxShadowLights).ToArray();
+        int layers = 0;
+        if (region is { } reg)
+            for (int slot = 0; slot < ranked.Count; slot++)
+                if (Vector3.Distance(ranked[slot].Light.Position, reg.Center) > FocusMargin * reg.Radius)
+                    layerOf[slot] = layers++;
+        int focusSize = Math.Min(2 * size, 4096);
+        var focus = layers > 0 ? _modern.Focus(layers, focusSize) : null;
+        var focusMat = new Matrix4x4[ShaderProgram.MaxShadowLights];
+        var focusTan = new float[ShaderProgram.MaxShadowLights];
 
         var farOf = new float[ranked.Count];
         for (int slot = 0; slot < ranked.Count; slot++)
@@ -203,6 +226,29 @@ internal sealed partial class SceneRenderer
                     DrawGeometry(depth, cmd);
                 }
             }
+
+            // the focused map: from the light towards the focus region, just wide enough to hold it
+            if (layerOf[slot] >= 0 && focus != null && region is { } fo)
+            {
+                var toRegion = fo.Center - light.Position;
+                float dist = toRegion.Length();
+                float half = MathF.Min(MathF.Asin(MathF.Min(fo.Radius / dist, 0.95f)) * 1.02f, 1.4f);
+                var up = MathF.Abs(toRegion.Y) < 0.99f * dist ? Vector3.UnitY : Vector3.UnitX;
+                var view = Matrix4x4.CreateLookAt(light.Position, fo.Center, up);
+                var focusProj = Transforms.Perspective(2 * half * 180f / MathF.PI, 1f, ShadowNear, MathF.Min(far, dist + fo.Radius));
+                focus.BindLayer(layerOf[slot]);
+                GL.Clear(ClearBufferMask.DepthBufferBit);
+                depth.Set("uView", view);
+                depth.Set("uProj", focusProj);
+                var fr = new Frustum(view * focusProj);
+                foreach (var cmd in _commands)
+                {
+                    if (!CastsShadow(cmd, light.Position, far, lightSize) || !fr.Visible(cmd.Center, cmd.Radius)) continue;
+                    DrawGeometry(depth, cmd);
+                }
+                focusMat[slot] = view * focusProj;
+                focusTan[slot] = MathF.Tan(half);
+            }
             farOf[slot] = far;
             slots[index] = slot;
         }
@@ -210,8 +256,69 @@ internal sealed partial class SceneRenderer
         _shader.Use();
         for (int k = 0; k < ranked.Count; k++) _shader.Set($"uShadowFar[{k}]", farOf[k]);
         _shader.Set("uShadowSize", (float)size);
+        for (int k = 0; k < ShaderProgram.MaxShadowLights; k++)
+        {
+            _shader.Set($"uShadowFocus[{k}]", k < ranked.Count ? layerOf[k] : -1);
+            if (k >= ranked.Count || layerOf[k] < 0) continue;
+            _shader.Set($"uShadowFocusMat[{k}]", focusMat[k]);
+            _shader.Set($"uShadowFocusTan[{k}]", focusTan[k]);
+        }
+        if (region is { } rg) _shader.Set("uShadowFocusSphere", new Vector4(rg.Center, rg.Radius));
+        _shader.Set("uShadowFocusSize", (float)focusSize);
         _shader.Set("uPass", 0);
         return slots;
+    }
+
+    /// <summary>A light farther than this many radii of the focus region from its centre gets a focused map.</summary>
+    private const float FocusMargin = 1.5f;
+
+    /// <summary>
+    /// The part of the scene where shadows should be sharpest: the view frustum from the near plane
+    /// to the depth that holds 90 % of the visible lit elements, as a bounding sphere. Elements that
+    /// glow (stars, suns) or enclose the camera (a sky) do not count. Null when nothing is visible.
+    /// </summary>
+    private (Vector3 Center, float Radius)? FocusRegion(RenderOptions options, Vector3 camera)
+    {
+        var viewProj = options.View * options.Projection;
+        var frustum = new Frustum(viewProj);
+        var reach = new List<float>();
+        foreach (var cmd in _commands)
+        {
+            if (cmd.Overlay || !cmd.Filled || !cmd.Lit || Glowing(cmd)) continue;
+            float d = Vector3.Distance(cmd.Center, camera);
+            if (d < cmd.Radius || !frustum.Visible(cmd.Center, cmd.Radius)) continue;
+            reach.Add(d + cmd.Radius);
+        }
+        if (reach.Count == 0 || !Matrix4x4.Invert(viewProj, out var inverse)) return null;
+        reach.Sort();
+        float depth = reach[(int)(0.9f * (reach.Count - 1))];
+
+        // the corners of the frustum on the near plane and at that depth
+        Span<Vector3> corners = stackalloc Vector3[8];
+        for (int c = 0; c < 4; c++)
+        {
+            float x = (c & 1) == 0 ? -1 : 1, y = (c & 2) == 0 ? -1 : 1;
+            var near = Unproject(x, y, -1);
+            var far = Unproject(x, y, 1);
+            float dn = EyeDepth(near), df = EyeDepth(far);
+            float t = df - dn > 1e-6f ? Math.Clamp((depth - dn) / (df - dn), 0f, 1f) : 1f;
+            corners[2 * c] = near;
+            corners[2 * c + 1] = Vector3.Lerp(near, far, t);
+        }
+        var center = Vector3.Zero;
+        foreach (var p in corners) center += p;
+        center /= corners.Length;
+        float radius = 0;
+        foreach (var p in corners) radius = MathF.Max(radius, Vector3.Distance(p, center));
+        return float.IsFinite(radius) && radius > 0 ? (center, radius) : null;
+
+        Vector3 Unproject(float x, float y, float z)
+        {
+            var v = Vector4.Transform(new Vector4(x, y, z, 1), inverse);
+            return new Vector3(v.X, v.Y, v.Z) / v.W;
+        }
+
+        float EyeDepth(Vector3 p) => -Vector3.Transform(p, options.View).Z;
     }
 
     /// <param name="lightSize">Radius of the light's glowing body (<see cref="FixtureRadius"/>), 0 for a point.</param>
@@ -219,32 +326,46 @@ internal sealed partial class SceneRenderer
     {
         if (cmd.Overlay || !cmd.Lit || !cmd.Filled || cmd.Material is not { CastsShadows: true } m) return false;
         if (m.Diffuse.A < 0.5f || IsGlass(m)) return false; // glass and the nearly invisible
-        // An element less than half the size of the light has an umbra shorter than its distance
-        // from the light: next to a sun it would throw a huge hard shadow across the scene (the shadow
-        // map treats the light as a point), while a real light that big leaves only a faint penumbra.
-        if (cmd.Radius < 0.5f * lightSize) return false;
         float d = Vector3.Distance(cmd.Center, light);
+        // An element smaller than the light's body has an umbra of length r·d/(R−r) behind it. When
+        // that is short (a small planet next to a sun), the shadow map, which treats the light as a
+        // point, would throw a huge hard shadow across the scene where a real light that big leaves
+        // only a faint penumbra. Elements whose umbra reaches well past them (a character in sunshine)
+        // keep their shadow.
+        if (cmd.Radius < lightSize && d < UmbraRadii * (lightSize - cmd.Radius)) return false;
         // an element enclosing the light (a lamp, a sun, a sky) does not shadow it
         return d >= cmd.Radius && d - cmd.Radius < far;
     }
 
+    /// <summary>An element casts a shadow from a light bigger than itself only when its umbra is at least this many of its radii long.</summary>
+    private const float UmbraRadii = 8f;
+
     /// <summary>
     /// The size of a light: the radius of the smallest glowing element centred on it (the sun sphere
-    /// around a sun's light, a bulb around a lamp's), or 0 when it has none and is a point.
+    /// around a sun's light, a bulb around a lamp's), or 0 when it has none and is a point. A glowing
+    /// element with other, unlit elements inside it is a sky, a halo or a room around the light, not
+    /// its body.
     /// </summary>
     private float FixtureRadius(Vector3 light)
     {
         float best = 0;
         foreach (var cmd in _commands)
         {
-            if (cmd.Overlay || !cmd.Filled || cmd.Material is not { } m || cmd.Radius <= 0) continue;
-            var e = m.Emission;
-            if (MathF.Max(e.R, MathF.Max(e.G, e.B)) * m.Glow < 0.5f) continue;
+            if (!Glowing(cmd) || cmd.Radius <= 0) continue;
             if (Vector3.Distance(cmd.Center, light) > 0.5f * cmd.Radius) continue;
-            if (best == 0 || cmd.Radius < best) best = cmd.Radius;
+            if (best != 0 && cmd.Radius >= best) continue;
+            bool body = true;
+            foreach (var other in _commands)
+                if (!ReferenceEquals(other, cmd) && !other.Overlay && other.Filled && !Glowing(other)
+                    && Vector3.Distance(other.Center, cmd.Center) < cmd.Radius) { body = false; break; }
+            if (body) best = cmd.Radius;
         }
         return best;
     }
+
+    /// <summary>Filled geometry that shines by itself (emission × glow at least 0.5): a sun, a bulb, a star, a sky.</summary>
+    private static bool Glowing(DrawCommand c) => !c.Overlay && c.Filled && c.Material is { } m
+        && MathF.Max(m.Emission.R, MathF.Max(m.Emission.G, m.Emission.B)) * m.Glow >= 0.5f;
 
     /// <summary>How much a light matters for the picture: its brightness where the camera is.</summary>
     private static float Importance(ActiveLight l, Vector3 camera)
@@ -381,6 +502,7 @@ internal sealed partial class SceneRenderer
         BindUnit(EnvUnit, TextureTarget.TextureCubeMap, 0);
         for (int k = 0; k < ShaderProgram.MaxShadowLights; k++)
             BindUnit(ShadowUnit + k, TextureTarget.TextureCubeMap, 0);
+        BindUnit(FocusUnit, TextureTarget.Texture2DArray, 0);
     }
 
     /// <summary>The six clip planes of a view-projection matrix, for culling bounding spheres.</summary>

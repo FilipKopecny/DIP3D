@@ -239,6 +239,7 @@ internal sealed partial class SceneRenderer : IDisposable
         program.Set("uAoTex", AoUnit);
         program.Set("uEnvMap", EnvUnit);
         for (int i = 0; i < ShaderProgram.MaxShadowLights; i++) program.Set($"uShadow{i}", ShadowUnit + i);
+        program.Set("uShadowFocusMap", FocusUnit);
     }
 
     private static void SetBlend(RenderOptions options)

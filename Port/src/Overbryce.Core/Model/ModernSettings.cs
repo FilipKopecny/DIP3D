@@ -31,10 +31,10 @@ public sealed class ModernSettings
     [Category("3 Shadows"), DisplayName("Softness"), Description("Width of the soft shadow edge (0 = hard).")]
     public float ShadowSoftness { get; set; } = 1f;
 
-    [Category("3 Shadows"), DisplayName("Lights with shadows"), Description("At most this many lights cast shadows at a time (0..4): the brightest ones near the camera.")]
-    public int ShadowLights { get; set; } = 4;
+    [Category("3 Shadows"), DisplayName("Lights with shadows"), Description("At most this many lights cast shadows at a time (0..8): the brightest ones near the camera. Each one costs a shadow map per frame.")]
+    public int ShadowLights { get; set; } = 8;
 
-    [Category("3 Shadows"), DisplayName("Map size"), Description("Resolution of each face of a light's shadow map (256..2048).")]
+    [Category("3 Shadows"), DisplayName("Map size"), Description("Resolution of each face of a light's shadow map (256..2048). A light far from the shot also gets a focused map of twice this size.")]
     public int ShadowMapSize { get; set; } = 1024;
 
     [Category("4 Ambient occlusion"), DisplayName("On"), Description("Creases and contacts get darker (screen-space ambient occlusion).")]
@@ -82,7 +82,7 @@ public sealed class ModernSettings
         BloomStrength = Math.Clamp(BloomStrength, 0f, 4f);
         BloomThreshold = Math.Clamp(BloomThreshold, 0f, 10f);
         ShadowSoftness = Math.Clamp(ShadowSoftness, 0f, 10f);
-        ShadowLights = Math.Clamp(ShadowLights, 0, 4);
+        ShadowLights = Math.Clamp(ShadowLights, 0, 8);
         ShadowMapSize = Math.Clamp(ShadowMapSize, 256, 2048);
         AoRadius = Math.Clamp(AoRadius, 0.01f, 100f);
         AoStrength = Math.Clamp(AoStrength, 0f, 4f);
