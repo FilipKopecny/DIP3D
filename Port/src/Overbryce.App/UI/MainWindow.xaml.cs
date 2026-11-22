@@ -50,6 +50,7 @@ internal sealed partial class MainWindow : Window
     private bool _exportCancel;
     // The outcome of the last import or frame export, shown while the view has no warning
     private string _notice = "";
+    private bool _closeWhenDone;
 
     // ------------------------------------------------------------------ controls
     private readonly GLControl _gl;
@@ -1394,8 +1395,7 @@ internal sealed partial class MainWindow : Window
         }
         finally
         {
-            _exporting = false;
-            Root.IsEnabled = true;
+            EndLongTask();
         }
     }
 
@@ -1473,8 +1473,7 @@ internal sealed partial class MainWindow : Window
         }
         finally
         {
-            _exporting = false;
-            Root.IsEnabled = true;
+            EndLongTask();
         }
     }
 
@@ -1703,8 +1702,7 @@ internal sealed partial class MainWindow : Window
         }
         finally
         {
-            _exporting = false;
-            Root.IsEnabled = true;
+            EndLongTask();
             OpenTK.Graphics.OpenGL4.GL.BindFramebuffer(OpenTK.Graphics.OpenGL4.FramebufferTarget.Framebuffer, 0);
             _gl.Invalidate();
         }
@@ -1832,8 +1830,26 @@ internal sealed partial class MainWindow : Window
             MessageKind.Information, "Controls");
     }
 
+    /// <summary>Ends an import or export: the window is usable again, or closes if that was asked for meanwhile.</summary>
+    private void EndLongTask()
+    {
+        _exporting = false;
+        Root.IsEnabled = true;
+        if (_closeWhenDone) Dispatcher.BeginInvoke(Close);
+    }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        if (_exporting)
+        {
+            // an import or export runs in a loop of this window: closing now would leave it running without a
+            // window, so cancel it and close when it has stopped
+            _exportCancel = true;
+            _closeWhenDone = true;
+            e.Cancel = true;
+            WarningStatus.Text = "Cancelling, then closing ...";
+            return;
+        }
         if (!ConfirmDiscard())
         {
             e.Cancel = true;
