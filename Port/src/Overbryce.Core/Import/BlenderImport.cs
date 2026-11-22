@@ -79,6 +79,8 @@ public static class BlenderImport
             log?.Invoke($"Blender finished ({clock.ElapsedMilliseconds} ms); building the animation ...");
             var file = BlenderSceneFile.Load(json);
             options.Name ??= name;
+            options.Log ??= log;
+            options.Cancel = cancel;
             var (animation, report, textureColors) = BlenderSceneImporter.Import(file, options);
             report.Info.Insert(0, $"Imported {Path.GetFileName(blendPath)} into {Path.GetFileName(aniPath)} on {DateTime.Now:yyyy-MM-dd HH:mm}.");
             if (textureColors != null)

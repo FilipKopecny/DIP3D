@@ -67,6 +67,8 @@ Overbryce animates by key states with a spline between them, not by per-frame cu
 
 The test scene below (96 frames) needs 54 key states.
 
+Only what changes is compared: elements that stand still all the time (a set dressed with thousands of stones and trees) cannot stray, so they are left out of the comparison, and a mesh is compared by an even sample of up to 256 of its vertices. A scene with a rigged character (a 53,000-vertex body) among 7,000 still objects chooses its key states in about a second. The editor's status line shows each stage; Esc cancels in any of them.
+
 ## Round trip: scenes exported by Overbryce
 
 A scene that Overbryce exported (see [Export to Blender](blender-export.md)), and maybe edited in Blender, comes back as the elements it was made from:

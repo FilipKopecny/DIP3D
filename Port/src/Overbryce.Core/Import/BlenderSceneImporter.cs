@@ -39,6 +39,12 @@ public sealed class BlenderImportOptions
 
     /// <summary>Plain boxes and rectangles become Overbryce's own shapes (off: every mesh is a polygon mesh).</summary>
     public bool RecognizeShapes { get; set; } = true;
+
+    /// <summary>Progress: a line as each stage of building the animation starts.</summary>
+    public Action<string>? Log { get; set; }
+
+    /// <summary>Stops the build between and within its stages (throws <see cref="OperationCanceledException"/>).</summary>
+    public CancellationToken Cancel { get; set; }
 }
 
 /// <summary>
@@ -105,28 +111,49 @@ public sealed partial class BlenderSceneImporter
 
     private Result Run()
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        void Stage(string what)
+        {
+            _options.Cancel.ThrowIfCancellationRequested();
+            _options.Log?.Invoke($"{what} ({clock.ElapsedMilliseconds} ms)");
+        }
         foreach (var note in _file.Notes) _report.AddScriptNote(note);
+        Stage($"Linking {_nodes.Length} objects");
         LinkNodes();
         if (!_options.Static) ReadTags();
+        Stage($"Reading {_frames} frames");
         SampleFrames();
+        Stage("Splitting meshes by material");
         BuildParts();
         DecideKept();
         ComputeBounds();
+        Stage("Calibrating the lights");
         Calibrate();
         _world = WorldAmbient();
+        Stage("Building the elements");
         BuildOutputTree();
         SampleOutputs();
 
         Animation animation;
         if (Restoring)
+        {
+            Stage("Restoring the exported elements");
             animation = RestoredAnimation();
+        }
         else
         {
             animation = new Animation(_options.Name ?? _file.Scene.Name);
             ApplySettings(animation);
-            foreach (int f in KeyFrames())
+            Stage("Choosing the key states");
+            var keys = KeyFrames().ToList();
+            Stage($"Building {keys.Count} key states");
+            foreach (int f in keys)
+            {
+                _options.Cancel.ThrowIfCancellationRequested();
                 animation.Scenes.Add(State(f));
+            }
         }
+        Stage("Writing the report");
         ReportSummary(animation);
         Func<double, double, double, (double, double, double)>? textures = null;
         if (_agx && !Restoring)
@@ -894,7 +921,8 @@ public sealed partial class BlenderSceneImporter
     private string? ActiveCamera(int f) =>
         _cameras.FirstOrDefault(c => c.Present(f) && !c.Node.Info.Instance && _file.Cameras.Length > f && c.Node.Info.Name == _file.Cameras[f])?.Name;
 
-    private Scene BuildState(int f)
+    /// <param name="fit">For choosing the key states: only what moves, and meshes by a sample of their vertices.</param>
+    private Scene BuildState(int f, bool fit = false)
     {
         var scene = new Scene("F" + (_file.Frames.Length > 0 ? _file.Frames[f] : f).ToString(CultureInfo.InvariantCulture)) { AniTime = TimeOf(f) };
         // the lights take the first OpenGL light slots
@@ -915,7 +943,7 @@ public sealed partial class BlenderSceneImporter
             scene.Add(sky);
         }
         foreach (var root in _roots)
-            if (Make(root, f) is { } e) scene.Add(e);
+            if (Make(root, f, fit) is { } e) scene.Add(e);
         ApplyFog(scene);
         return scene;
     }
@@ -954,20 +982,21 @@ public sealed partial class BlenderSceneImporter
         };
     }
 
-    private Element? Make(Out o, int f)
+    private Element? Make(Out o, int f, bool fit = false)
     {
         if (!o.Present(f)) return null;
+        if (fit && !Moves(o)) return null;
         Element e;
         if (o.Kind == OutKind.Group)
         {
             var g = new GroupElement(o.Name);
             foreach (var c in o.Children)
-                if (Make(c, f) is { } child) g.Add(child);
+                if (Make(c, f, fit) is { } child) g.Add(child);
             e = g;
         }
         else
         {
-            var mesh = Primitive(o) ?? new PolyMeshElement(o.Name, MeshAt(o.Node, o.Part!, f));
+            var mesh = Primitive(o) ?? new PolyMeshElement(o.Name, fit ? FitMeshAt(o.Node, o.Part!, f) : MeshAt(o.Node, o.Part!, f));
             SurfaceOf(o.Part!.Material, f).ApplyTo(mesh);
             int tex = o.Part.Material >= 0 && o.Part.Material < _file.Materials.Count ? _file.Materials[o.Part.Material].Texture : -1;
             if (tex >= 0 && tex < _file.Textures.Count) mesh.Texture = _file.Textures[tex].File;
@@ -1103,6 +1132,6 @@ public sealed partial class BlenderSceneImporter
         if (_boxes + _rectangles > 0)
             _report.Note($"Recognised {_boxes} box{(_boxes == 1 ? "" : "es")} and {_rectangles} rectangle{(_rectangles == 1 ? "" : "s")} (Overbryce's own shapes instead of polygon meshes).");
         int meshes = a.Scenes.SelectMany(s => s.Descendants()).OfType<PolyMeshElement>().Select(p => p.Data).Distinct().Count();
-        _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count() + _tags.Values.Count(t => t.Role == null)} elements ({_lights.Count} lights, {_cameras.Count} cameras), {meshes} polygon mesh{(meshes == 1 ? "" : "es")}, {_file.Textures.Count} texture{(_file.Textures.Count == 1 ? "" : "s")}.");
+        _report.Note($"{a.Scenes.Count} key state{(a.Scenes.Count == 1 ? "" : "s")}, {AllOutputs().Count() + _tags.Values.Count(t => t.Role == null)} elements ({_lights.Count} light{(_lights.Count == 1 ? "" : "s")}, {_cameras.Count} camera{(_cameras.Count == 1 ? "" : "s")}), {meshes} polygon mesh{(meshes == 1 ? "" : "es")}, {_file.Textures.Count} texture{(_file.Textures.Count == 1 ? "" : "s")}.");
     }
 }

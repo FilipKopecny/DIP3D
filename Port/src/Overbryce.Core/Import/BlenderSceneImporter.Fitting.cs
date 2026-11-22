@@ -16,14 +16,107 @@ public sealed partial class BlenderSceneImporter
 
     private List<int> FitKeyFrames()
     {
+        FindMoving();
+        try { return FitKeyFramesOf(); }
+        finally
+        {
+            // the fitting states and meshes are not needed for the key states themselves
+            _fitStates.Clear();
+            _fitMeshes.Clear();
+        }
+    }
+
+    // ================================================================== what the fitting looks at
+
+    /// <summary>
+    /// The elements that change during the animation (and the groups above them). Only these can stray between key
+    /// states, so the fitting leaves the rest out: a scene with thousands of still objects fits as fast as without.
+    /// </summary>
+    private HashSet<Out> _moving = [];
+
+    /// <summary>Most vertices of a mesh the fitting looks at (an evenly spread sample of the mesh).</summary>
+    private const int FitVertices = 256;
+
+    private readonly Dictionary<int, Scene> _fitStates = [];
+    private readonly Dictionary<(Part, int), PolyMeshData> _fitMeshes = [];
+
+    private bool Moves(Out o) => _moving.Contains(o);
+
+    private void FindMoving()
+    {
+        _moving = [];
+        // a group that moves carries everything in it along
+        bool Visit(Out o, bool carried)
+        {
+            bool own = carried || Varies(o.Position) || Varies(o.Angles);
+            if (o.Kind == OutKind.Mesh)
+                own |= o.Node.Deforms || o.Node.StretchVaries || Animated(o.Part!.Material);
+            bool any = false;
+            foreach (var c in o.Children) any |= Visit(c, own && o.Kind == OutKind.Group);
+            if (!own && !any) return false;
+            _moving.Add(o);
+            return true;
+        }
+        foreach (var root in _roots) Visit(root, false);
+    }
+
+    private static bool Varies(Vec3d[] values)
+    {
+        for (int f = 1; f < values.Length; f++)
+            if ((values[f] - values[0]).Length > 1e-9 * (1 + values[0].Length)) return true;
+        return false;
+    }
+
+    private bool Animated(int material) =>
+        material >= 0 && material < _file.Materials.Count && _file.Materials[material].Track >= 0 && _file.Materials[material].TrackWidth > 0;
+
+    /// <summary>The key state of frame <paramref name="f"/> as the fitting sees it (built once).</summary>
+    private Scene FitState(int f)
+    {
+        if (!_fitStates.TryGetValue(f, out var scene)) _fitStates[f] = scene = BuildState(f, fit: true);
+        return scene;
+    }
+
+    /// <summary>
+    /// <see cref="MeshAt"/> for the fitting: at most <see cref="FitVertices"/> of the vertices (every n-th, the same
+    /// ones in every frame, so they morph like the whole mesh) and no triangles. Read straight from Blender's
+    /// deformed positions, without building the whole mesh and its normals for every frame.
+    /// </summary>
+    private PolyMeshData FitMeshAt(Node n, Part part, int f)
+    {
+        if (!n.Valid[f]) f = n.Reference;
+        bool deformed = n.Deforms && n.Info.Deform!.Length > f && n.Info.Deform[f] >= 0;
+        if (!deformed && !n.StretchVaries) f = n.Reference;
+        if (_fitMeshes.TryGetValue((part, f), out var cached)) return cached;
+        int count = part.Source.Length;
+        int step = Math.Max(1, (count + FitVertices - 1) / FitVertices);
+        int kept = (count + step - 1) / step;
+        var p = new float[kept * 3];
+        var co = deformed ? _file.Floats(n.Info.Deform![f], _file.Meshes[n.Info.Mesh].VertexCount * 3) : part.Local.Positions;
+        for (int j = 0; j < kept; j++)
+        {
+            int s = (deformed ? part.Source[j * step] : j * step) * 3;
+            p[j * 3] = co[s]; p[j * 3 + 1] = co[s + 1]; p[j * 3 + 2] = co[s + 2];
+        }
+        var mesh = new PolyMeshData(p, new float[p.Length], null, []);
+        var stretch = n.Stretch[f];
+        if (!IsIdentity(stretch)) mesh = mesh.Transform(stretch.ToNumerics());
+        _fitMeshes[(part, f)] = mesh;
+        return mesh;
+    }
+
+    private List<int> FitKeyFramesOf()
+    {
         var keys = new SortedSet<int>(FindForcedKeys());
         int forced = keys.Count;
         var passed = new HashSet<(int, int, int, int)>();
         for (int round = 0; round < 200; round++)
         {
+            _options.Cancel.ThrowIfCancellationRequested();
+            _options.Log?.Invoke($"Choosing the key states: round {round + 1}, {keys.Count} key states so far");
             var list = keys.ToList();
             var animation = new Animation("Fit");
-            animation.Scenes.AddRange(list.Select(State));
+            animation.Scenes.AddRange(list.Select(FitState));
             var inserts = new List<int>();
             for (int j = 0; j + 1 < list.Count; j++)
             {
@@ -37,7 +130,8 @@ public sealed partial class BlenderSceneImporter
                 float ta = TimeOf(a), tb = TimeOf(b);
                 for (int f = a + 1; f < b; f++)
                 {
-                    double e = Error(State(f), animation.EvaluateSegment(j, (TimeOf(f) - ta) / (tb - ta)));
+                    _options.Cancel.ThrowIfCancellationRequested();
+                    double e = Error(FitState(f), animation.EvaluateSegment(j, (TimeOf(f) - ta) / (tb - ta)));
                     if (e > worst) { worst = e; at = f; }
                 }
                 if (at >= 0) inserts.Add(at);

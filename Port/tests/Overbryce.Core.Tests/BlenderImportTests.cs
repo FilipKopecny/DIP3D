@@ -372,6 +372,60 @@ public class BlenderImportTests
     }
 
     [Fact]
+    public void A_large_deforming_mesh_is_fitted_by_a_sample_and_stays_within_the_tolerance()
+    {
+        // 961 vertices: the fitting looks at every fourth of them, the key states morph all
+        const int frames = 25, side = 31;
+        var s = new SyntheticBlenderScene(frames);
+        var flat = new Vector3[side * side];
+        for (int y = 0; y < side; y++)
+            for (int x = 0; x < side; x++) flat[y * side + x] = new Vector3(x / 10f, y / 10f, 0);
+        var triangles = new List<int>();
+        for (int y = 0; y + 1 < side; y++)
+            for (int x = 0; x + 1 < side; x++)
+            {
+                int i = y * side + x;
+                triangles.AddRange([i, i + 1, i + side, i + 1, i + side + 1, i + side]);
+            }
+        int obj = s.AddObject("Cloth", "MESH", Matrix4x4.Identity, mesh: s.AddMesh(flat, [.. triangles]));
+        Vector3[] At(int f) => flat.Select(v => v + new Vector3(0, 0, 0.5f * MathF.Sin(v.X * 2 + f / 6f))).ToArray();
+        s.Deform(obj, At);
+        var animation = BlenderSceneImporter.Import(s.Build(), AsMeshes).Animation;
+        Assert.True(animation.Scenes.Count < frames);
+        double worst = WorstMeshError(animation, "Cloth", f => At(f).Select(ToYUp).ToList(), frames);
+        Assert.True(worst < 0.02, $"strays {worst}");
+    }
+
+    [Fact]
+    public void Still_objects_do_not_change_or_slow_the_choice_of_key_states()
+    {
+        // a scene full of still objects (stones, trees) around one moving object, as in a set dressed for a character
+        const int frames = 97;
+        var path = Enumerable.Range(0, frames).Select(f =>
+        {
+            float t = f / (float)(frames - 1);
+            return Deg(0, 0, 360 * t) * Matrix4x4.CreateTranslation(4 * MathF.Sin(3 * t), 2 * t, t * t);
+        }).ToArray();
+        SyntheticBlenderScene Scene(int stillObjects)
+        {
+            var s = new SyntheticBlenderScene(frames);
+            int cube = s.AddCube();
+            s.AddObject("Spinner", "MESH", path, mesh: cube);
+            // where the spinner is in the frames that measure the scene, so its size (and the tolerance) stays the same
+            for (int i = 0; i < stillObjects; i++)
+                s.AddObject($"Stone{i}", "MESH", path[i % 9 * (frames - 1) / 8], mesh: cube);
+            return s;
+        }
+        static List<float> Times(Animation a) => a.Scenes.Select(k => k.AniTime).ToList();
+        var alone = BlenderSceneImporter.Import(Scene(0).Build(), AsMeshes).Animation;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var crowded = BlenderSceneImporter.Import(Scene(2500).Build(), AsMeshes).Animation;
+        Assert.Equal(Times(alone), Times(crowded));
+        Assert.All(crowded.Scenes, k => Assert.Equal(2501, k.Children.Count(c => c.Name.StartsWith("Stone", StringComparison.Ordinal) || c.Name == "Spinner")));
+        Assert.True(clock.Elapsed.TotalSeconds < 60, $"took {clock.Elapsed.TotalSeconds:0} s");
+    }
+
+    [Fact]
     public void Wrong_files_are_refused()
     {
         Assert.Throws<InvalidDataException>(() => BlenderSceneFile.Parse("{\"format\":\"something else\"}", []));
