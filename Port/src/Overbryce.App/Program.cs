@@ -17,7 +17,7 @@ internal static class Program
         // Overbryce.exe file.ani --frames outFolder [--from 0] [--to 10] [--view ...] [--wire] [--size 1280x720] [--modern|--classic]
         //   with --raytrace [--samples 64] [--bounces 6] either is ray traced (with --classic: the classic look through the tracer)
         // Overbryce.exe file.ani --blender outFolder [--no-blend]
-        // Overbryce.exe scene.blend --import-blender out.ani [--static] [--axis auto|yup|zup]
+        // Overbryce.exe scene.blend --import-blender out.ani [--static] [--axis auto|yup|zup] [--tolerance 0.001]
         string? file = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
         int ib = Array.IndexOf(args, "--import-blender");
         if (file != null && ib >= 0 && ib + 1 < args.Length)
@@ -27,11 +27,15 @@ internal static class Program
             try
             {
                 int ax = Array.IndexOf(args, "--axis");
+                int tol = Array.IndexOf(args, "--tolerance");
                 var options = new Core.Import.BlenderImportOptions
                 {
                     Static = args.Contains("--static"),
                     Axis = ax >= 0 && ax + 1 < args.Length && Enum.TryParse<Core.Import.ImportAxis>(args[ax + 1], true, out var axis) ? axis : Core.Import.ImportAxis.Auto,
                 };
+                if (tol >= 0 && tol + 1 < args.Length && double.TryParse(args[tol + 1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double tolerance))
+                    options.Tolerance = Math.Max(0, tolerance);
                 var result = Core.Import.BlenderImport.Run(Path.GetFullPath(file), Path.GetFullPath(args[ib + 1]), options, Console.WriteLine);
                 foreach (var line in result.Report.Approximated) Console.WriteLine("Approximated: " + line);
                 foreach (var line in result.Report.Dropped) Console.WriteLine("Left out: " + line);

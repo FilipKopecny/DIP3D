@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Overbryce.Core.Import;
 using Overbryce.Core.Model;
 
@@ -13,7 +13,7 @@ public class BlenderImportTests
         new(-1, -1, 1), new(1, -1, 1), new(1, 1, 1), new(-1, 1, 1),
     ];
 
-    /// <summary>Blender's Z up as Overbryce's Y up: (x, y, z) → (x, z, -y).</summary>
+    /// <summary>Blender's Z up as Overbryce's Y up: (x, y, z) â†’ (x, z, -y).</summary>
     private static Vector3 ToYUp(Vector3 v) => new(v.X, v.Z, -v.Y);
 
     private static Matrix4x4 Deg(float x, float y, float z) =>
@@ -165,7 +165,7 @@ public class BlenderImportTests
     {
         var s = new SyntheticBlenderScene();
         s.AddPointLight("Lamp", Matrix4x4.CreateTranslation(0, 0, 5), 1000);
-        // a Blender camera at -10 on Y, turned 90° about X, looks along +Y at the origin
+        // a Blender camera at -10 on Y, turned 90Â° about X, looks along +Y at the origin
         s.AddCamera("Cam", Deg(90, 0, 0) * Matrix4x4.CreateTranslation(0, -10, 0), 40, 0.5f, 250);
         s.AddObject("Box", "MESH", Matrix4x4.Identity, mesh: s.AddCube());
         s.Cameras.Add("Cam");
@@ -250,6 +250,84 @@ public class BlenderImportTests
 
         var still = BlenderSceneImporter.Import(s.Build(), new BlenderImportOptions { Static = true }).Animation;
         Assert.Single(still.Scenes);
+    }
+
+    /// <summary>The largest distance between the vertices of Blender's frames and Overbryce's in-between frames.</summary>
+    private static double WorstMeshError(Animation animation, string name, Func<int, List<Vector3>> truth, int frames)
+    {
+        double worst = 0;
+        for (int f = 0; f < frames; f++)
+        {
+            var e = (PolyMeshElement)animation.Evaluate(f / 24f)!.FindChild(name)!;
+            var expected = truth(f);
+            var actual = WorldVertices(e);
+            foreach (var p in expected) worst = Math.Max(worst, actual.Min(q => Vector3.Distance(p, q)));
+        }
+        return worst;
+    }
+
+    [Fact]
+    public void Smooth_motion_needs_few_key_states_and_stays_within_the_tolerance()
+    {
+        const int frames = 97;
+        var s = new SyntheticBlenderScene(frames);
+        var path = Enumerable.Range(0, frames).Select(f =>
+        {
+            float t = f / (float)(frames - 1);
+            return Deg(0, 0, 360 * t) * Matrix4x4.CreateTranslation(4 * MathF.Sin(3 * t), 2 * t, t * t);
+        }).ToArray();
+        s.AddObject("Spinner", "MESH", path, mesh: s.AddCube());
+        var options = new BlenderImportOptions { Tolerance = 0.001 };
+        var animation = BlenderSceneImporter.Import(s.Build(), options).Animation;
+        Assert.InRange(animation.Scenes.Count, 3, frames / 3);
+        double worst = WorstMeshError(animation, "Spinner", f => CubeCorners.Select(v => ToYUp(Vector3.Transform(v, path[f]))).ToList(), frames);
+        Assert.True(worst < 0.01, $"strays {worst}");   // the scene is a few units big: 0.001 of it is below 0.01
+    }
+
+    [Fact]
+    public void A_jump_becomes_a_stop_and_does_not_swing_the_rest()
+    {
+        const int frames = 30;
+        var s = new SyntheticBlenderScene(frames);
+        var path = Enumerable.Range(0, frames).Select(f => Matrix4x4.CreateTranslation(f < 15 ? 0.1f * f : 10 + 0.1f * f, 0, 0)).ToArray();
+        s.AddObject("Teleport", "MESH", path, mesh: s.AddCube());
+        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        var times = animation.Scenes.Select(k => (int)MathF.Round(k.AniTime * 24)).ToList();
+        Assert.Contains(14, times);
+        Assert.Contains(15, times);
+        Assert.True(animation.Scenes[times.IndexOf(15)].FindChild("Teleport")!.MotionBoundary);
+        double worst = WorstMeshError(animation, "Teleport", f => CubeCorners.Select(v => ToYUp(Vector3.Transform(v, path[f]))).ToList(), frames);
+        Assert.True(worst < 0.02, $"strays {worst}");
+    }
+
+    [Fact]
+    public void A_camera_cut_switches_at_its_frame()
+    {
+        const int frames = 20;
+        var s = new SyntheticBlenderScene(frames);
+        s.AddCamera("A", Matrix4x4.CreateTranslation(0, -10, 0), 40);
+        s.AddCamera("B", Matrix4x4.CreateTranslation(5, -10, 0), 40);
+        s.AddObject("Box", "MESH", Matrix4x4.Identity, mesh: s.AddCube());
+        for (int f = 0; f < frames; f++) s.Cameras.Add(f < 12 ? "A" : "B");
+        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        for (int f = 0; f < frames; f++)
+            Assert.Equal(f < 12 ? "A" : "B", animation.Evaluate(f / 24f)!.ActiveCamera!.Name);
+    }
+
+    [Fact]
+    public void Deforming_meshes_morph_between_key_states()
+    {
+        const int frames = 25;
+        var s = new SyntheticBlenderScene(frames);
+        Vector3[] flat = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)];
+        int mesh = s.AddMesh(flat, [0, 1, 2, 1, 3, 2]);
+        int obj = s.AddObject("Wave", "MESH", Matrix4x4.Identity, mesh: mesh);
+        Vector3[] At(int f) => flat.Select((v, i) => i == 3 ? v + new Vector3(0, 0, MathF.Sin(f / 10f)) : v).ToArray();
+        s.Deform(obj, At);
+        var animation = BlenderSceneImporter.Import(s.Build()).Animation;
+        Assert.True(animation.Scenes.Count < frames);
+        double worst = WorstMeshError(animation, "Wave", f => At(f).Select(ToYUp).ToList(), frames);
+        Assert.True(worst < 0.01, $"strays {worst}");
     }
 
     [Fact]

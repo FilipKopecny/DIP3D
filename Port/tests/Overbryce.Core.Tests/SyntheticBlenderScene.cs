@@ -140,6 +140,14 @@ public sealed class SyntheticBlenderScene(int frames = 1)
     public int AddObject(string name, string kind, Matrix4x4 world, int parent = -1, int mesh = -1) =>
         AddObject(name, kind, [world], parent, mesh);
 
+    /// <summary>Makes an object's mesh deform: its Blender vertices per frame (as a shape key or a modifier would).</summary>
+    public void Deform(int obj, Func<int, Vector3[]> verticesAt)
+    {
+        var offsets = new long[Frames];
+        for (int f = 0; f < Frames; f++) offsets[f] = Write(verticesAt(f).SelectMany(v => new[] { v.X, v.Y, v.Z }).ToArray());
+        _objects[obj]["deform"] = offsets;
+    }
+
     /// <summary>A point light: colour, power in watts, radius.</summary>
     public int AddPointLight(string name, Matrix4x4 world, float power, float radius = 0)
     {

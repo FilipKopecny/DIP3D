@@ -30,6 +30,12 @@ public sealed class BlenderImportOptions
 
     /// <summary>At most this many instances (geometry nodes, particles, collection instances) are imported.</summary>
     public int MaxInstances { get; set; } = 4000;
+
+    /// <summary>
+    /// How far the animation between key states may stray from Blender's, as a part of the scene's size (0.001: a
+    /// millimetre in a scene of a metre). Key states are added where it strays further. 0: every frame is a key state.
+    /// </summary>
+    public double Tolerance { get; set; } = 0.001;
 }
 
 /// <summary>
@@ -45,7 +51,7 @@ public sealed class BlenderImportOptions
 /// <item>Lights and cameras sit directly in the key state, at their place in the world.</item>
 /// </list>
 /// </summary>
-public sealed class BlenderSceneImporter
+public sealed partial class BlenderSceneImporter
 {
     private readonly BlenderSceneFile _file;
     private readonly BlenderImportOptions _options;
@@ -110,7 +116,7 @@ public sealed class BlenderSceneImporter
         var animation = new Animation(_options.Name ?? _file.Scene.Name);
         ApplySettings(animation);
         foreach (int f in KeyFrames())
-            animation.Scenes.Add(BuildState(f));
+            animation.Scenes.Add(State(f));
         ReportSummary(animation);
         Func<double, double, double, (double, double, double)>? textures = null;
         if (_agx)
@@ -216,7 +222,8 @@ public sealed class BlenderSceneImporter
     private IEnumerable<int> KeyFrames()
     {
         if (_options.Static || _frames == 1) return [0];
-        return Enumerable.Range(0, _frames);
+        if (_options.Tolerance <= 0) return Enumerable.Range(0, _frames);
+        return FitKeyFrames();
     }
 
     private float TimeOf(int frameIndex) =>
@@ -489,24 +496,27 @@ public sealed class BlenderSceneImporter
         var min = new Vec3d(double.MaxValue, double.MaxValue, double.MaxValue);
         var max = -min;
         bool any = false;
+        // the space the scene takes over the whole animation: nine frames from the first to the last
+        var frames = Enumerable.Range(0, 9).Select(i => i * (_frames - 1) / 8).Distinct().ToList();
         foreach (var n in _nodes)
         {
             if (!n.Kept || n.Kind != NodeKind.Geometry) continue;
-            foreach (var part in n.Parts)
-            {
-                var (lo, hi) = part.Local.Bounds;
-                var frame = n.Frame[n.Reference];
-                var s = n.Stretch[n.Reference];
-                for (int k = 0; k < 8; k++)
+            foreach (int f in frames.Where(f => n.Present(f)).DefaultIfEmpty(n.Reference))
+                foreach (var part in n.Parts)
                 {
-                    var corner = new Vec3d((k & 1) != 0 ? hi.X : lo.X, (k & 2) != 0 ? hi.Y : lo.Y, (k & 4) != 0 ? hi.Z : lo.Z);
-                    var w = frame.R * (s * corner) + frame.T;
-                    if (!double.IsFinite(w.X + w.Y + w.Z)) continue;
-                    min = new Vec3d(Math.Min(min.X, w.X), Math.Min(min.Y, w.Y), Math.Min(min.Z, w.Z));
-                    max = new Vec3d(Math.Max(max.X, w.X), Math.Max(max.Y, w.Y), Math.Max(max.Z, w.Z));
-                    any = true;
+                    var (lo, hi) = (n.Deforms ? MeshAt(n, part, f) : part.Local).Bounds;
+                    var frame = n.Frame[f];
+                    var s = n.Deforms ? Mat3.Identity : n.Stretch[f];
+                    for (int k = 0; k < 8; k++)
+                    {
+                        var corner = new Vec3d((k & 1) != 0 ? hi.X : lo.X, (k & 2) != 0 ? hi.Y : lo.Y, (k & 4) != 0 ? hi.Z : lo.Z);
+                        var w = frame.R * (s * corner) + frame.T;
+                        if (!double.IsFinite(w.X + w.Y + w.Z)) continue;
+                        min = new Vec3d(Math.Min(min.X, w.X), Math.Min(min.Y, w.Y), Math.Min(min.Z, w.Z));
+                        max = new Vec3d(Math.Max(max.X, w.X), Math.Max(max.Y, w.Y), Math.Max(max.Z, w.Z));
+                        any = true;
+                    }
                 }
-            }
         }
         if (!any) return;
         _center = (min + max) * 0.5;
@@ -838,26 +848,62 @@ public sealed class BlenderSceneImporter
 
     // ================================================================== key states
 
+    private readonly Dictionary<int, Scene> _states = [];
+    private readonly Dictionary<int, List<Out>> _shownLights = [];
+
+    /// <summary>The key state of sampled frame <paramref name="f"/> (built once).</summary>
+    private Scene State(int f)
+    {
+        if (!_states.TryGetValue(f, out var scene)) _states[f] = scene = BuildState(f);
+        return scene;
+    }
+
+    /// <summary>The lights of frame <paramref name="f"/>: the eight brightest at the scene's centre, in their order.</summary>
+    private List<Out> ShownLights(int f)
+    {
+        if (!_shownLights.TryGetValue(f, out var list))
+            _shownLights[f] = list = _lights.Where(l => l.Present(f)).OrderByDescending(l => Importance(l, f)).Take(LightElement.MaxPerScene)
+                .OrderBy(l => _lights.IndexOf(l)).ToList();
+        return list;
+    }
+
+    private string? ActiveCamera(int f) =>
+        _cameras.FirstOrDefault(c => c.Present(f) && !c.Node.Info.Instance && _file.Cameras.Length > f && c.Node.Info.Name == _file.Cameras[f])?.Name;
+
     private Scene BuildState(int f)
     {
         var scene = new Scene("F" + (_file.Frames.Length > 0 ? _file.Frames[f] : f).ToString(CultureInfo.InvariantCulture)) { AniTime = TimeOf(f) };
-        // the lights take the first OpenGL light slots; the eight brightest at the scene's centre are kept
-        foreach (var light in _lights.Where(l => l.Present(f)).OrderByDescending(l => Importance(l, f)).Take(LightElement.MaxPerScene)
-                     .OrderBy(l => _lights.IndexOf(l)))
-            scene.Add(MakeLight(light, f));
-        string active = _file.Cameras.Length > f ? _file.Cameras[f] : "";
+        // the lights take the first OpenGL light slots
+        foreach (var light in ShownLights(f))
+            scene.Add(Mark(MakeLight(light, f), light, f));
+        string? active = ActiveCamera(f);
         CameraElement? view = null;
         foreach (var camera in _cameras.Where(c => c.Present(f)))
         {
-            var c = MakeCamera(camera, f, camera.Node.Info.Name == active && !camera.Node.Info.Instance);
+            var c = MakeCamera(camera, f, camera.Name == active);
             if (c.Active) view = c;
-            scene.Add(c);
+            scene.Add(Mark(c, camera, f));
         }
-        if (_sky != null) scene.Add(MakeSky(view));
+        if (_sky != null)
+        {
+            var sky = MakeSky(view);
+            sky.MotionBoundary = _skyStops.Contains(f);
+            scene.Add(sky);
+        }
         foreach (var root in _roots)
             if (Make(root, f) is { } e) scene.Add(e);
         ApplyFog(scene);
         return scene;
+    }
+
+    /// <summary>Elements that stop at a key state (a jump, see <see cref="FindForcedKeys"/>).</summary>
+    private readonly Dictionary<int, HashSet<Out>> _stops = [];
+    private readonly HashSet<int> _skyStops = [];
+
+    private T Mark<T>(T e, Out o, int f) where T : Element
+    {
+        if (_stops.TryGetValue(f, out var set) && set.Contains(o)) e.MotionBoundary = true;
+        return e;
     }
 
     /// <summary>
@@ -904,7 +950,7 @@ public sealed class BlenderSceneImporter
             e = mesh;
         }
         Place(e, o.Position[f], o.Angles[f]);
-        return e;
+        return Mark(e, o, f);
     }
 
     private static void Place(Element e, Vec3d position, Vec3d angles)
