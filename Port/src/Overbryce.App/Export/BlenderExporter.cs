@@ -901,22 +901,7 @@ internal sealed class BlenderExporter
     // ================================================================== Blender
 
     /// <summary>Blender's executable: the BLENDER environment variable, or the newest one in Program Files.</summary>
-    public static string? FindBlender()
-    {
-        if (Environment.GetEnvironmentVariable("BLENDER") is { } env && File.Exists(env)) return env;
-        foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"C:\Program Files" })
-        {
-            string dir = Path.Combine(root, "Blender Foundation");
-            if (!Directory.Exists(dir)) continue;
-            var found = Directory.GetDirectories(dir)
-                .Select(d => Path.Combine(d, "blender.exe"))
-                .Where(File.Exists)
-                .OrderByDescending(p => Version.TryParse(new string(Path.GetFileName(Path.GetDirectoryName(p))!.Where(ch => char.IsDigit(ch) || ch == '.').ToArray()), out var v) ? v : new Version(0, 0))
-                .FirstOrDefault();
-            if (found != null) return found;
-        }
-        return null;
-    }
+    public static string? FindBlender() => Core.Import.BlenderImport.FindBlender();
 
     /// <summary>Runs Blender in the background to build the .blend file; returns its exit code.</summary>
     public static int BuildBlend(string blender, string jsonPath, string blendPath, Action<string>? log = null)
